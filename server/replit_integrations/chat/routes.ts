@@ -2,10 +2,27 @@ import type { Express, Request, Response } from "express";
 import OpenAI from "openai";
 import { chatStorage } from "./storage";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+let openai: OpenAI | null = null;
+
+function initializeOpenAI() {
+  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+    console.warn(
+      "⚠️  AI_INTEGRATIONS_OPENAI_API_KEY is not set. AI chat features will be unavailable.",
+    );
+    return;
+  }
+
+  try {
+    openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  } catch (error) {
+    console.warn("⚠️  Failed to initialize OpenAI client:", error);
+  }
+}
+
+initializeOpenAI();
 
 export function registerChatRoutes(app: Express): void {
   // Get all conversations
@@ -81,6 +98,10 @@ export function registerChatRoutes(app: Express): void {
       res.setHeader("Connection", "keep-alive");
 
       // Stream response from OpenAI
+      if (!openai) {
+        return res.status(503).json({ error: "OpenAI is not configured" });
+      }
+
       const stream = await openai.chat.completions.create({
         model: "gpt-5.1",
         messages: chatMessages,

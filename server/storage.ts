@@ -1,4 +1,4 @@
-import { db } from "./db";
+import { getDb } from "./db";
 import {
   surveys,
   type Survey,
@@ -18,20 +18,24 @@ export interface IStorage {
 
 export class DatabaseStorage implements IStorage {
   async getSurveys(): Promise<Survey[]> {
+    const db = getDb();
     return await db.select().from(surveys).orderBy(desc(surveys.createdAt));
   }
 
   async getSurvey(id: number): Promise<Survey | undefined> {
+    const db = getDb();
     const [survey] = await db.select().from(surveys).where(eq(surveys.id, id));
     return survey;
   }
 
   async createSurvey(insertSurvey: InsertSurvey): Promise<Survey> {
+    const db = getDb();
     const [survey] = await db.insert(surveys).values(insertSurvey).returning();
     return survey;
   }
 
   async updateSurvey(id: number, updates: UpdateSurveyRequest): Promise<Survey> {
+    const db = getDb();
     const [updated] = await db
       .update(surveys)
       .set({ ...updates, updatedAt: new Date() })
@@ -41,6 +45,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteSurvey(id: number): Promise<void> {
+    const db = getDb();
     await db.delete(surveys).where(eq(surveys.id, id));
   }
 }

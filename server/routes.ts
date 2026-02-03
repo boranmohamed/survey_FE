@@ -6,10 +6,27 @@ import { z } from "zod";
 import { registerChatRoutes } from "./replit_integrations/chat"; // Using chat for rephrase/logic if needed
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
-});
+let openai: OpenAI | null = null;
+
+function initializeOpenAI() {
+  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+    console.warn(
+      "⚠️  AI_INTEGRATIONS_OPENAI_API_KEY is not set. AI features will be unavailable.",
+    );
+    return;
+  }
+
+  try {
+    openai = new OpenAI({
+      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+    });
+  } catch (error) {
+    console.warn("⚠️  Failed to initialize OpenAI client:", error);
+  }
+}
+
+initializeOpenAI();
 
 export async function registerRoutes(
   httpServer: Server,
@@ -102,6 +119,10 @@ export async function registerRoutes(
         ]
       }`;
 
+      if (!openai) {
+        return res.status(503).json({ message: "OpenAI is not configured" });
+      }
+
       const response = await openai.chat.completions.create({
         model: "gpt-5.1",
         messages: [
@@ -127,6 +148,10 @@ export async function registerRoutes(
     try {
       const { prompt, language } = req.body;
       
+      if (!openai) {
+        return res.status(503).json({ message: "OpenAI is not configured" });
+      }
+
       const response = await openai.chat.completions.create({
         model: "gpt-5.1",
         messages: [
@@ -152,7 +177,11 @@ export async function registerRoutes(
   });
 
   // === Seed Data ===
-  await seedDatabase();
+  try {
+    await seedDatabase();
+  } catch (error) {
+    console.warn("⚠️  Could not seed database (database may not be configured):", error instanceof Error ? error.message : error);
+  }
 
   return httpServer;
 }
