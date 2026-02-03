@@ -1,0 +1,47 @@
+Product Requirement: Al-Khwarizmi Survey Platform - Configuration Screen
+ 
+Purpose: Enable users to define essential survey metadata including survey name, language selection (English, Arabic, or Bilingual), and collection modes (field or web links) as the foundational step in the survey creation process, ensuring clarity and ease of setup.
+ 
+UI Components:
+- Top-level horizontal multi-step stepper showing current step "Configuration" with subsequent steps: Builder, Logic, Design, Share
+- Survey Metadata Form with fields: Survey Name (text input), Language Selector (dropdown with English, Arabic, Bilingual), Collection Mode Selector (toggle or radio buttons for Field and Web Links)
+- Primary Action Button labeled “Next” to proceed to Builder step
+- Secondary Action Button labeled “Save Draft” for intermediate saving
+- Breadcrumb navigation reflecting progression and allowing step revisits
+- Contextual help icon/tooltips providing brief explanations for metadata options
+- Status indicator showing form validation state and completion readiness
+ 
+Visual Style:
+- Theme: Light mode
+- Primary color: Teal (#008080)
+- Supporting colors: Dark Blue (#003366), Soft Gray (#F5F7FA), Accent Orange (#FF6F3C)
+- Spacing: Generous white space with consistent 24px vertical rhythm and 16px horizontal padding inside containers
+- Borders: Subtle 1px solid borders (#D1D9E6) with 8px border radius on input fields and buttons
+- Typography: Use a clean sans-serif font such as "Inter" or "Roboto" with a hierarchy of 16px body text, 20px section headings in semi-bold, and 14px for labels and help text in medium weight
+ 
+The Enhanced AI Configuration Screen:
+ 
+Smart Rephrase Component: Add a "✨ Smart Rephrase" button next to the prompt input field. Design a "Split-View" comparison modal that appears after clicking, showing "Original" vs. "Professionalized" text with "Use This," "Revert," and "Edit" actions.
+ 
+Dynamic Parameter Toggles: Update the "Number of Questions" and "Number of Pages" counters to include an "AI Suggested" badge when the system auto-scales based on prompt depth.
+ 
+Workflow Toggle: A card or toggle for "Review survey plan before generation (Yes/No)".
+ 
+The New "Survey Blueprint" Review Screen:
+ 
+This screen appears after "Generate Questions" but before entering the full Builder.
+ 
+Visual Structure: A vertical "Structure Map" showing Section Titles, Page Breaks, and Question Types (e.g., "Page 1: 5 Questions - Star Rating, Multiple Choice").
+ 
+Iteration Footer: Include an "Approve & Generate" button and a "Provide Feedback to Re-Plan" button. Add a small counter: "Plan Attempt 1/3".
+ 
+ 
+Versioning & History Sidebar:
+ 
+Design a collapsible right-hand sidebar titled "Survey History".
+ 
+Timeline View: A list of versions (V1, V2, V3) with timestamps and summary tags (e.g., "V3: Active," "V2: Restored from Plan").
+ 
+Action: A "Restore Version" button for any non-active state.
+ 
+Visual Style Goal: Ensure the Arabic/English bilingual support is reflected in the UI layout. Use subtle animations (like a shimmer or a pulse) during the "Validate & Fix" processing state to show the AI is working internally.
