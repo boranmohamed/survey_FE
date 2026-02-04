@@ -48,6 +48,7 @@ export default function ConfigPage() {
   const [numPages, setNumPages] = useState(1);
   const [reviewPlan, setReviewPlan] = useState(true);
   const [blueprint, setBlueprint] = useState<any>(null);
+  const [isPromptEnabled, setIsPromptEnabled] = useState(true); // Toggle state for textarea
 
   // Hooks
   const createSurvey = useCreateSurvey();
@@ -84,7 +85,27 @@ export default function ConfigPage() {
   };
 
   const handleGenerate = async () => {
-    if (!surveyId) return;
+    // Ensure we have a surveyId before generating
+    // If surveyId is null, create a survey first with current form values
+    let currentSurveyId = surveyId;
+    
+    if (!currentSurveyId) {
+      try {
+        const formValues = form.getValues();
+        const newSurvey = await createSurvey.mutateAsync({
+          name: formValues.name || "Untitled Survey",
+          language: formValues.language,
+          collectionMode: formValues.collectionMode
+        });
+        currentSurveyId = newSurvey.id;
+        setSurveyId(currentSurveyId);
+      } catch (error) {
+        // If database is not configured, use a temporary ID for frontend-only flow
+        currentSurveyId = Date.now();
+        setSurveyId(currentSurveyId);
+        console.warn("Survey creation failed, continuing in frontend-only mode:", error);
+      }
+    }
 
     try {
       const plan = await generateSurvey.mutateAsync({
@@ -99,11 +120,24 @@ export default function ConfigPage() {
         setCurrentStep("blueprint");
       } else {
         // Direct save and proceed
-        await updateSurvey.mutateAsync({ 
-          id: surveyId, 
-          structure: plan 
-        });
-        setLocation(`/builder/${surveyId}`);
+        try {
+          await updateSurvey.mutateAsync({ 
+            id: currentSurveyId, 
+            structure: plan 
+          });
+        } catch (updateError) {
+          // If update fails, continue anyway in frontend-only mode
+          console.warn("Survey update failed, continuing in frontend-only mode:", updateError);
+        }
+        // Store structure in localStorage as fallback for mock mode
+        if (currentSurveyId) {
+          try {
+            localStorage.setItem(`survey_${currentSurveyId}_structure`, JSON.stringify(plan));
+          } catch (e) {
+            console.warn("Failed to save to localStorage:", e);
+          }
+        }
+        setLocation(`/builder/${currentSurveyId}`);
       }
     } catch (err) {
       // Error handled by hook toast
@@ -122,10 +156,23 @@ export default function ConfigPage() {
 
   const handleBlueprintApprove = async () => {
     if (surveyId && blueprint) {
-      await updateSurvey.mutateAsync({ 
-        id: surveyId, 
-        structure: blueprint 
-      });
+      try {
+        await updateSurvey.mutateAsync({ 
+          id: surveyId, 
+          structure: blueprint 
+        });
+      } catch (updateError) {
+        // If update fails, continue anyway in frontend-only mode
+        console.warn("Survey update failed, continuing in frontend-only mode:", updateError);
+      }
+      // Store structure in localStorage as fallback for mock mode
+      if (surveyId) {
+        try {
+          localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(blueprint));
+        } catch (e) {
+          console.warn("Failed to save to localStorage:", e);
+        }
+      }
       setLocation(`/builder/${surveyId}`);
     }
   };
@@ -296,16 +343,29 @@ export default function ConfigPage() {
                           size="sm" 
                           className="text-primary hover:text-primary/80 hover:bg-primary/5"
                           onClick={() => setShowRephraseDialog(true)}
+                          disabled={!isPromptEnabled}
                         >
                           <RefreshCw className="w-4 h-4 mr-2" /> Smart Rephrase
                         </Button>
                       </label>
-                      <Textarea 
-                        placeholder="e.g. Create a customer satisfaction survey for a luxury hotel chain focusing on check-in experience, room cleanliness, and dining options." 
-                        className="min-h-[160px] text-lg p-6 rounded-xl border-border bg-white shadow-sm resize-none focus:ring-2 focus:ring-primary/20"
-                        value={aiPrompt}
-                        onChange={(e) => setAiPrompt(e.target.value)}
-                      />
+                      {/* Textarea container with toggle inside */}
+                      <div className="relative">
+                        <Textarea 
+                          placeholder="e.g. Create a customer satisfaction survey for a luxury hotel chain focusing on check-in experience, room cleanliness, and dining options." 
+                          className="min-h-[160px] text-lg p-6 rounded-xl border-border bg-white shadow-sm resize-none focus:ring-2 focus:ring-primary/20"
+                          value={aiPrompt}
+                          onChange={(e) => setAiPrompt(e.target.value)}
+                          disabled={!isPromptEnabled}
+                        />
+                        {/* Toggle switch positioned inside textarea area at the bottom */}
+                        <div className="absolute bottom-4 right-4">
+                          <Switch
+                            checked={isPromptEnabled}
+                            onCheckedChange={setIsPromptEnabled}
+                            id="prompt-toggle"
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     {/* Example Prompts */}
@@ -329,37 +389,6 @@ export default function ConfigPage() {
 
                   {/* Sidebar Controls */}
                   <div className="md:col-span-4 space-y-6">
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-border space-y-6">
-                      <h3 className="font-bold text-lg text-secondary border-b pb-2 mb-4">Configuration</h3>
-                      
-                      <CounterInput 
-                        label="Questions" 
-                        value={numQuestions} 
-                        onChange={setNumQuestions} 
-                        min={3} 
-                        max={20} 
-                      />
-                      
-                      <CounterInput 
-                        label="Pages" 
-                        value={numPages} 
-                        onChange={setNumPages} 
-                        min={1} 
-                        max={5} 
-                      />
-
-                      <div className="flex items-center justify-between pt-4 border-t">
-                        <label className="text-sm font-medium text-foreground cursor-pointer" htmlFor="review-toggle">
-                          Review Blueprint
-                        </label>
-                        <Switch 
-                          id="review-toggle" 
-                          checked={reviewPlan} 
-                          onCheckedChange={setReviewPlan} 
-                        />
-                      </div>
-                    </div>
-
                     <Button 
                       className="w-full btn-primary py-6 text-lg shadow-xl shadow-primary/20" 
                       onClick={handleGenerate}
@@ -368,7 +397,7 @@ export default function ConfigPage() {
                       {generateSurvey.isPending ? (
                         <>Generating <span className="animate-pulse">...</span></>
                       ) : (
-                        <>Generate Structure <Wand2 className="ml-2 w-5 h-5" /></>
+                        <>Generate <Wand2 className="ml-2 w-5 h-5" /></>
                       )}
                     </Button>
                   </div>
