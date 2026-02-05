@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { GeneratedSurveyResponse, SurveyPlanResponse } from "@shared/routes";
+import { GenerateSurveyResponse, SurveyPlanResponse } from "@shared/routes";
 import { Button } from "./ui/button";
 import { Check, Edit2, RotateCcw, Info, FileText, X } from "lucide-react";
 import { motion } from "framer-motion";
@@ -23,7 +23,7 @@ import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
 
 interface BlueprintReviewProps {
-  plan: GeneratedSurveyResponse | SurveyPlanResponse;
+  plan: GenerateSurveyResponse | SurveyPlanResponse;
   onApprove: () => void;
   onRetry: () => void;
   onReject?: (feedback: string) => void;
@@ -34,7 +34,7 @@ interface BlueprintReviewProps {
 /**
  * Type guard to check if plan is from planner API
  */
-function isPlannerResponse(plan: GeneratedSurveyResponse | SurveyPlanResponse): plan is SurveyPlanResponse {
+function isPlannerResponse(plan: GenerateSurveyResponse | SurveyPlanResponse): plan is SurveyPlanResponse {
   return 'plan' in plan && 'approval_status' in plan && 'thread_id' in plan;
 }
 
@@ -278,21 +278,6 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
           ))}
         </div>
 
-        {/* Generated Questions (if approved) */}
-        {plannerPlan.approval_status === "approved" && plannerPlan.generated_questions && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Generated Questions</CardTitle>
-              <CardDescription>Fully rendered questions from the Question Writer agent</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <pre className="text-xs bg-muted p-3 rounded overflow-auto">
-                {JSON.stringify(plannerPlan.generated_questions, null, 2)}
-              </pre>
-            </CardContent>
-          </Card>
-        )}
-
         {/* Action Buttons - Moved to end of page */}
         <div className="flex flex-col sm:flex-row gap-3 justify-center pt-6 border-t border-border">
           {onReject && threadId ? (
@@ -371,8 +356,8 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
     );
   }
 
-  // Handle legacy format (GeneratedSurveyResponse)
-  const legacyPlan = plan as GeneratedSurveyResponse;
+  // Handle legacy format (GenerateSurveyResponse)
+  const legacyPlan = plan as GenerateSurveyResponse;
   
   // Safety check: ensure plan has sections
   if (!legacyPlan || !legacyPlan.sections || !Array.isArray(legacyPlan.sections) || legacyPlan.sections.length === 0) {
@@ -412,7 +397,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
 
       <div className="space-y-6">
         {/* Structure Map */}
-        {legacyPlan.sections.map((section, idx) => (
+        {legacyPlan.sections.map((section: GenerateSurveyResponse['sections'][number], idx: number) => (
           <motion.div
             key={idx}
             initial={{ opacity: 0, y: 20 }}
@@ -429,7 +414,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
               </span>
             </div>
             <div className="p-6 space-y-4">
-              {section.questions.map((q, qIdx) => (
+              {section.questions.map((q: GenerateSurveyResponse['sections'][number]['questions'][number], qIdx: number) => (
                 <div key={qIdx} className="flex gap-4 items-start group">
                   <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 font-bold text-sm">
                     {qIdx + 1}
