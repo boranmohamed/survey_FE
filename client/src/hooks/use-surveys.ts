@@ -11,6 +11,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { postSurveyPlanFast } from "@/lib/anomalyBackend";
 import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan } from "@/lib/plannerBackend";
+import { toPlannerLanguageCode } from "@/lib/language";
 
 // ============================================
 // SURVEY HOOKS
@@ -525,14 +526,11 @@ export function useRephrasePrompt() {
   
   return useMutation({
     mutationFn: async (data: { prompt: string, language: string }) => {
-      // Map language names to language codes for the API
-      // The form uses "English", "Arabic", "Bilingual" but API expects codes like "en", "ar"
-      const languageMap: Record<string, string> = {
-        "English": "en",
-        "Arabic": "ar",
-        "Bilingual": "en" // Default to English for bilingual
-      };
-      const languageCode = languageMap[data.language] || "en";
+      // Important: the planner/rewrite backend contract expects strict values:
+      // "en" | "ar" | "both".
+      // The UI uses labels like "English" | "Arabic" | "Bilingual".
+      // We normalize here to always send the clean contract (Bilingual -> "both").
+      const languageCode = toPlannerLanguageCode(data.language);
       
       // Prepare request body matching the API specification
       const requestBody = {

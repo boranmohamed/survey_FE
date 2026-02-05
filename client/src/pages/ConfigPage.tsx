@@ -5,6 +5,7 @@ import { Globe, Smartphone, Link as LinkIcon, Sparkles, Wand2, Lightbulb, ArrowR
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { toPlannerLanguageCode } from "@/lib/language";
 
 import {
   useCreateSurvey,
@@ -139,11 +140,15 @@ export default function ConfigPage() {
       
       if (isPromptEnabled) {
         // Toggle ON: Use planner API (POST then GET)
+        // Important: planner backend expects strict language codes: "en" | "ar" | "both".
+        // The UI stores labels like "English" | "Arabic" | "Bilingual".
+        // We normalize here to keep the backend contract clean and predictable.
+        const plannerLanguage = toPlannerLanguageCode(formValues.language);
         const createRequest = {
           prompt: aiPrompt,
           title: formValues.name,
           type: formValues.type,
-          language: formValues.language,
+          language: plannerLanguage,
           numQuestions,
           numPages,
         };
@@ -152,6 +157,12 @@ export default function ConfigPage() {
         console.log("🔵 Creating survey plan with planner API...");
         const createResponse = await createSurveyPlan.mutateAsync(createRequest);
         const newThreadId = createResponse.thread_id;
+        // Defensive check: backend contract should always return a thread_id,
+        // but the shared type marks it as optional for backward compatibility.
+        // Failing early here avoids passing an undefined thread_id downstream.
+        if (!newThreadId) {
+          throw new Error("Planner API did not return a thread_id. Please try again.");
+        }
         console.log("✅ Plan created, thread_id:", newThreadId);
 
         // Step 2: Retrieve the full plan
