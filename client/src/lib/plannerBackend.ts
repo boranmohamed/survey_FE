@@ -788,3 +788,192 @@ export async function updateSurveyPlan(
   return normalizedResponse;
 }
 
+/**
+ * Generate survey rules by calling the POST generate rules endpoint.
+ * Generates validation and conditional rules for the survey based on user prompt.
+ * 
+ * @param thread_id - The unique thread identifier for the survey
+ * @param options - Optional parameters for rule generation
+ * @param options.user_prompt - Custom instructions for rule generation
+ * @param options.expected_rules_count - Target number of rules (default: 8, min: 1, max: 50)
+ * @returns Response containing generated rules and validation summary
+ */
+export async function generateSurveyRules(
+  thread_id: string,
+  options?: {
+    user_prompt?: string;
+    expected_rules_count?: number;
+  }
+): Promise<{
+  thread_id: string;
+  rules: {
+    survey_rules: Array<{
+      meta_rule: {
+        rule_id: string;
+        rule_type: string;
+        description_en: string;
+        description_ar: string;
+      };
+      conditions: Array<{
+        left_side: {
+          type: string;
+          question_id: string;
+          data_type?: string;
+        };
+        operator: string;
+        right_side: {
+          type: string;
+          value: any;
+          data_type?: string;
+        };
+      }>;
+      actions: Array<{
+        type: string;
+        action_element: string;
+        message_en?: string;
+        message_ar?: string;
+        sequence?: number;
+        action_answer?: string;
+      }>;
+    }>;
+  };
+  critique_summary?: {
+    initial_validation: {
+      valid_count: number;
+      invalid_count: number;
+      errors_by_category?: Record<string, any>;
+    };
+    after_fixing: {
+      valid_count: number;
+      invalid_count: number;
+    };
+    final_rules_count: number;
+  };
+}> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/agentic-survey/${thread_id}/rules/generate`;
+  
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  // Build request body - only include fields that are provided
+  const requestBody: any = {};
+  if (options?.user_prompt !== undefined) {
+    requestBody.user_prompt = options.user_prompt;
+  }
+  if (options?.expected_rules_count !== undefined) {
+    requestBody.expected_rules_count = options.expected_rules_count;
+  }
+
+  const doPost = async (url: string) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doPost(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+      
+      // Try to parse error response
+      let errorMessage = `Rules generation API error (${res.status}). ${text || res.statusText}`;
+      try {
+        const errorData = text ? JSON.parse(text) : null;
+        if (errorData?.detail) {
+          // Handle both string and array detail formats
+          if (typeof errorData.detail === 'string') {
+            errorMessage = errorData.detail;
+          } else if (Array.isArray(errorData.detail)) {
+            // Validation errors - format them nicely
+            const errors = errorData.detail.map((err: any) => 
+              `${err.loc?.join('.')}: ${err.msg}`
+            ).join('; ');
+            errorMessage = `Validation error: ${errors}`;
+          } else {
+            errorMessage = JSON.stringify(errorData.detail);
+          }
+        } else if (errorData?.status?.message) {
+          errorMessage = errorData.status.message;
+        }
+      } catch {
+        // Use default error message
+      }
+      throw new Error(errorMessage);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Rules generation API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Rules generation API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full rules generation API response:", JSON.stringify(finalJson, null, 2));
+
+  // Validate response structure
+  if (!finalJson || typeof finalJson !== 'object') {
+    throw new Error("Rules generation API returned invalid response");
+  }
+
+  const response = finalJson as any;
+  
+  // Extract data from either data object or root level
+  const data = response.data || response;
+  
+  // Validate required fields
+  if (!data.thread_id && !response.thread_id) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  if (!data.rules && !response.rules) {
+    console.error("❌ Could not find rules in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rules");
+  }
+
+  // Return normalized response
+  const normalizedResponse = {
+    thread_id: data.thread_id || response.thread_id || thread_id,
+    rules: data.rules || response.rules,
+    critique_summary: data.critique_summary || response.critique_summary,
+  };
+
+  console.log("✅ Normalized rules generation response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+

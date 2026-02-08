@@ -10,7 +10,7 @@ import {
 } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
 import { postSurveyPlanFast } from "@/lib/anomalyBackend";
-import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan } from "@/lib/plannerBackend";
+import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan, generateSurveyRules } from "@/lib/plannerBackend";
 import { toPlannerLanguageCode } from "@/lib/language";
 
 // ============================================
@@ -741,6 +741,64 @@ export function useUpdateSurveyPlan() {
       const errorMessage = error instanceof Error ? error.message : "Failed to update survey plan. Please try again.";
       toast({
         title: "Update failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    },
+  });
+}
+
+/**
+ * Generate survey rules using the agentic survey API.
+ * 
+ * This hook calls POST /api/agentic-survey/{thread_id}/rules/generate to generate
+ * validation and conditional rules for the survey based on user prompt.
+ * 
+ * @returns Mutation hook for generating survey rules
+ */
+export function useGenerateSurveyRules() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ 
+      thread_id, 
+      user_prompt, 
+      expected_rules_count 
+    }: { 
+      thread_id: string; 
+      user_prompt?: string; 
+      expected_rules_count?: number;
+    }) => {
+      try {
+        return await generateSurveyRules(thread_id, {
+          user_prompt,
+          expected_rules_count,
+        });
+      } catch (error) {
+        // Provide detailed error messages
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message = "Failed to fetch: Could not reach the rules generation API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onSuccess: (data) => {
+      const rulesCount = data.rules?.survey_rules?.length || 0;
+      toast({
+        title: "Rules generated successfully",
+        description: `Generated ${rulesCount} rule${rulesCount !== 1 ? 's' : ''} for your survey.`,
+        variant: "default"
+      });
+    },
+    onError: (error) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate survey rules. Please try again.";
+      toast({
+        title: "Rules generation failed",
         description: errorMessage,
         variant: "destructive"
       });

@@ -1,35 +1,160 @@
-import { useState } from "react";
-import { useRoute, Link } from "wouter";
-import { RotateCw, Type } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useRoute } from "wouter";
+import { Type, Loader2, CheckCircle2, AlertCircle, Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HistorySidebar } from "@/components/HistorySidebar";
+import { useGenerateSurveyRules } from "@/hooks/use-surveys";
+import { useToast } from "@/hooks/use-toast";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 /**
  * RulesPage - Page for generating survey rules
  * 
  * Allows users to input rule requirements and generate rules for their survey.
  * Features a large textarea with character counter and generate button.
+ * Calls the API endpoint POST /api/agentic-survey/{thread_id}/rules/generate
+ * to generate validation and conditional rules based on user input.
  */
 export default function RulesPage() {
   const [, params] = useRoute("/rules/:id");
   const surveyId = params?.id ? Number(params.id) : null;
+  const { toast } = useToast();
   
   // State for rule requirements input
   const [ruleRequirements, setRuleRequirements] = useState<string>("");
   const maxCharacters = 1000;
   const characterCount = ruleRequirements.length;
+  
+  // State for thread_id (required for API call)
+  const [threadId, setThreadId] = useState<string | null>(null);
+  
+  // State for generated rules
+  const [generatedRules, setGeneratedRules] = useState<{
+    thread_id: string;
+    rules: {
+      survey_rules: Array<{
+        meta_rule: {
+          rule_id: string;
+          rule_type: string;
+          description_en: string;
+          description_ar: string;
+        };
+        conditions: Array<{
+          left_side: {
+            type: string;
+            question_id: string;
+            data_type?: string;
+          };
+          operator: string;
+          right_side: {
+            type: string;
+            value: any;
+            data_type?: string;
+          };
+        }>;
+        actions: Array<{
+          type: string;
+          action_element: string;
+          message_en?: string;
+          message_ar?: string;
+          sequence?: number;
+          action_answer?: string;
+        }>;
+      }>;
+    };
+    critique_summary?: {
+      initial_validation: {
+        valid_count: number;
+        invalid_count: number;
+        errors_by_category?: Record<string, any>;
+      };
+      after_fixing: {
+        valid_count: number;
+        invalid_count: number;
+      };
+      final_rules_count: number;
+    };
+  } | null>(null);
+  
+  // Hook for generating rules
+  const generateRules = useGenerateSurveyRules();
+
+  /**
+   * Get thread_id from localStorage on mount and when surveyId changes
+   * Similar to how BuilderPage retrieves thread_id
+   */
+  useEffect(() => {
+    let foundThreadId: string | null = null;
+    
+    // First, try survey-specific storage
+    if (surveyId) {
+      try {
+        const storedThreadId = localStorage.getItem(`survey_${surveyId}_thread_id`);
+        if (storedThreadId) {
+          foundThreadId = storedThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+    
+    // If not found, try general storage
+    if (!foundThreadId) {
+      try {
+        const generalThreadId = localStorage.getItem("current_thread_id");
+        if (generalThreadId) {
+          foundThreadId = generalThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+    
+    setThreadId(foundThreadId);
+  }, [surveyId]);
 
   /**
    * Handle generate rules button click
-   * TODO: Implement rules generation logic
+   * Calls the API to generate rules based on user requirements
    */
-  const handleGenerateRules = () => {
+  const handleGenerateRules = async () => {
     if (!ruleRequirements.trim()) {
+      toast({
+        title: "Empty input",
+        description: "Please enter rule requirements before generating.",
+        variant: "destructive",
+      });
       return;
     }
-    // TODO: Call API to generate rules
-    console.log("Generating rules with requirements:", ruleRequirements);
+
+    // Check if thread_id is available
+    if (!threadId) {
+      toast({
+        title: "Thread ID not found",
+        description: "This survey was generated using fast mode (without planner API). Rules generation requires a survey generated with the planner API (toggle ON in config page). Please regenerate the survey with the planner API enabled.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Call the API with user prompt and optional expected rules count
+      const response = await generateRules.mutateAsync({
+        thread_id: threadId,
+        user_prompt: ruleRequirements.trim() || undefined,
+        // You can optionally set expected_rules_count here if needed
+        // expected_rules_count: 8,
+      });
+      
+      // Store the generated rules to display them
+      setGeneratedRules(response);
+    } catch (error) {
+      // Error is handled by the hook's onError callback (toast notification)
+      console.error("Error generating rules:", error);
+      // Clear rules on error
+      setGeneratedRules(null);
+    }
   };
 
   return (
@@ -44,19 +169,11 @@ export default function RulesPage() {
 
           {/* Content Container */}
           <div className="bg-white rounded-xl shadow-sm border border-border p-6 md:p-8">
-            {/* Header with prompt and history link */}
+            {/* Header with prompt */}
             <div className="flex items-start justify-between mb-6">
               <label className="text-base font-medium text-secondary">
                 Let us know what rules you want to create:
               </label>
-              
-              {/* History link */}
-              <Link href={surveyId ? `/builder/${surveyId}` : "/config"}>
-                <button className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-                  <RotateCw className="w-4 h-4" />
-                  History
-                </button>
-              </Link>
             </div>
 
             {/* Textarea Container with relative positioning for button */}
@@ -86,14 +203,172 @@ export default function RulesPage() {
               <div className="absolute bottom-3 right-3">
                 <Button
                   onClick={handleGenerateRules}
-                  disabled={!ruleRequirements.trim()}
-                  className="bg-[#4FD1C7] hover:bg-[#38B2AC] text-white border-0 shadow-sm"
+                  disabled={!ruleRequirements.trim() || generateRules.isPending || !threadId}
+                  className="bg-[#4FD1C7] hover:bg-[#38B2AC] text-white border-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Generate Rules
+                  {generateRules.isPending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    "Generate Rules"
+                  )}
                 </Button>
               </div>
             </div>
           </div>
+
+          {/* Generated Rules Display Section */}
+          {generatedRules && generatedRules.rules?.survey_rules && generatedRules.rules.survey_rules.length > 0 && (
+            <div className="mt-8 space-y-4">
+              <h2 className="text-2xl font-semibold text-secondary mb-4">
+                Generated Rules ({generatedRules.rules.survey_rules.length})
+              </h2>
+              
+              <div className="space-y-4">
+                {generatedRules.rules.survey_rules.map((rule, index) => {
+                  // Map rule types to icons and colors
+                  const getRuleTypeInfo = (ruleType: string) => {
+                    switch (ruleType) {
+                      case "error_message":
+                        return { icon: AlertCircle, color: "text-red-600", bgColor: "bg-red-50", borderColor: "border-red-200" };
+                      case "warning_message":
+                        return { icon: AlertCircle, color: "text-yellow-600", bgColor: "bg-yellow-50", borderColor: "border-yellow-200" };
+                      case "hide_question":
+                      case "hide_answer":
+                        return { icon: EyeOff, color: "text-gray-600", bgColor: "bg-gray-50", borderColor: "border-gray-200" };
+                      case "show_question":
+                      case "show_answer":
+                        return { icon: Eye, color: "text-blue-600", bgColor: "bg-blue-50", borderColor: "border-blue-200" };
+                      case "disable_question":
+                        return { icon: Lock, color: "text-orange-600", bgColor: "bg-orange-50", borderColor: "border-orange-200" };
+                      case "enable_question":
+                        return { icon: Unlock, color: "text-green-600", bgColor: "bg-green-50", borderColor: "border-green-200" };
+                      default:
+                        return { icon: CheckCircle2, color: "text-primary", bgColor: "bg-primary/5", borderColor: "border-primary/20" };
+                    }
+                  };
+
+                  const typeInfo = getRuleTypeInfo(rule.meta_rule.rule_type);
+                  const Icon = typeInfo.icon;
+
+                  return (
+                    <Card key={index} className={`${typeInfo.bgColor} ${typeInfo.borderColor} border-2`}>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-lg">
+                          <Icon className={`w-5 h-5 ${typeInfo.color}`} />
+                          <span className={typeInfo.color}>
+                            {rule.meta_rule.rule_id}: {rule.meta_rule.rule_type.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                          </span>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {/* Description */}
+                        <div>
+                          <p className="text-sm font-medium text-secondary mb-1">Description:</p>
+                          <p className="text-sm text-muted-foreground">{rule.meta_rule.description_en}</p>
+                          {rule.meta_rule.description_ar && (
+                            <p className="text-sm text-muted-foreground mt-1" dir="rtl">{rule.meta_rule.description_ar}</p>
+                          )}
+                        </div>
+
+                        {/* Conditions */}
+                        {rule.conditions && rule.conditions.length > 0 && (
+                          <div>
+                            <p className="text-sm font-medium text-secondary mb-2">Conditions:</p>
+                            <div className="space-y-2">
+                              {rule.conditions.map((condition, condIdx) => (
+                                <div key={condIdx} className="bg-white/50 rounded-md p-3 border border-border/50">
+                                  <div className="text-sm">
+                                    <span className="font-medium">{condition.left_side.question_id}</span>
+                                    {" "}
+                                    <span className="text-muted-foreground">
+                                      {condition.operator.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}
+                                    </span>
+                                    {" "}
+                                    <span className="font-medium">
+                                      {typeof condition.right_side.value === "object" 
+                                        ? JSON.stringify(condition.right_side.value)
+                                        : String(condition.right_side.value)}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Actions */}
+                        {rule.actions && rule.actions.length > 0 && (
+                          <div>
+                            <p className="text-sm font-medium text-secondary mb-2">Actions:</p>
+                            <div className="space-y-2">
+                              {rule.actions.map((action, actionIdx) => (
+                                <div key={actionIdx} className="bg-white/50 rounded-md p-3 border border-border/50">
+                                  <div className="text-sm">
+                                    <span className="font-medium">{action.type.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())}</span>
+                                    {" "}
+                                    <span className="text-muted-foreground">on</span>
+                                    {" "}
+                                    <span className="font-medium">{action.action_element}</span>
+                                    {action.message_en && (
+                                      <div className="mt-1 text-muted-foreground">
+                                        <span className="text-xs">EN: </span>{action.message_en}
+                                      </div>
+                                    )}
+                                    {action.message_ar && (
+                                      <div className="mt-1 text-muted-foreground" dir="rtl">
+                                        <span className="text-xs">AR: </span>{action.message_ar}
+                                      </div>
+                                    )}
+                                    {action.action_answer && (
+                                      <div className="mt-1 text-xs text-muted-foreground">
+                                        Answer: {action.action_answer}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {/* Critique Summary (if available) */}
+              {generatedRules.critique_summary && (
+                <Card className="mt-6 bg-blue-50 border-blue-200">
+                  <CardHeader>
+                    <CardTitle className="text-lg text-blue-900">Validation Summary</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                      <div>
+                        <p className="text-muted-foreground">Initial Valid</p>
+                        <p className="font-semibold text-green-600">{generatedRules.critique_summary.initial_validation.valid_count}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Initial Invalid</p>
+                        <p className="font-semibold text-red-600">{generatedRules.critique_summary.initial_validation.invalid_count}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">After Fixing Valid</p>
+                        <p className="font-semibold text-green-600">{generatedRules.critique_summary.after_fixing.valid_count}</p>
+                      </div>
+                      <div>
+                        <p className="text-muted-foreground">Final Rules Count</p>
+                        <p className="font-semibold text-blue-600">{generatedRules.critique_summary.final_rules_count}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
         </main>
       </div>
 

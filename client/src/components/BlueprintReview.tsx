@@ -193,7 +193,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                 <CardHeader className="pb-3">
                   <AccordionTrigger className="hover:no-underline py-0">
                     <CardTitle className="flex items-center gap-2">
-                      <Info className="w-5 h-5" /> Planning Rationale
+                      Planning Rationale
                     </CardTitle>
                   </AccordionTrigger>
                   <CardDescription className="pt-1">
