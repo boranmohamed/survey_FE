@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from "react";
-import { useRoute } from "wouter";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { useRoute, useLocation } from "wouter";
+import { ArrowLeft, Trash2, ArrowRight } from "lucide-react";
 import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { HistorySidebar } from "@/components/HistorySidebar";
 import { QuestionCard } from "@/components/QuestionCard";
-import { useSurvey, useUpdateSurvey } from "@/hooks/use-surveys";
+import { useSurvey, useUpdateSurvey, useUpdateSurveyPlan } from "@/hooks/use-surveys";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -34,6 +35,7 @@ import { useToast } from "@/hooks/use-toast";
  */
 export default function BuilderPage() {
   const [, params] = useRoute("/builder/:id");
+  const [, setLocation] = useLocation();
   const surveyId = params?.id ? Number(params.id) : null;
   const { toast } = useToast();
   
@@ -43,10 +45,44 @@ export default function BuilderPage() {
   const [localStructure, setLocalStructure] = useState<any>(null);
   // Ref to track previous structure to avoid unnecessary updates
   const prevStructureRef = useRef<string>("");
+  // State for edit input value
+  const [editInputValue, setEditInputValue] = useState<string>("");
+  // State to track if thread_id is available (for enabling/disabling edit feature)
+  const [hasThreadId, setHasThreadId] = useState<boolean>(false);
   
   // Fetch survey data
   const { data: survey, isLoading } = useSurvey(surveyId);
   const updateSurvey = useUpdateSurvey();
+  const updateSurveyPlan = useUpdateSurveyPlan();
+
+  // Check if thread_id is available on mount and when surveyId changes
+  useEffect(() => {
+    let threadId: string | null = null;
+    if (surveyId) {
+      try {
+        const storedThreadId = localStorage.getItem(`survey_${surveyId}_thread_id`);
+        if (storedThreadId) {
+          threadId = storedThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+    
+    // Also check general storage
+    if (!threadId) {
+      try {
+        const generalThreadId = localStorage.getItem("current_thread_id");
+        if (generalThreadId) {
+          threadId = generalThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+    
+    setHasThreadId(!!threadId);
+  }, [surveyId]);
 
   // Extract survey structure - check both API response and localStorage fallback
   // Use local structure if available, otherwise use survey structure
@@ -133,6 +169,110 @@ export default function BuilderPage() {
         description: "Failed to delete page. Please try again.",
         variant: "destructive",
       });
+    }
+  };
+
+  /**
+   * Handle arrow click - calls the update survey plan API
+   * Updates the survey plan based on natural language instructions
+   */
+  const handleArrowClick = async () => {
+    if (!editInputValue.trim()) {
+      toast({
+        title: "Empty input",
+        description: "Please enter some text before submitting.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Get thread_id from localStorage (stored when survey is generated)
+    // Check both survey-specific and general thread_id storage
+    let threadId: string | null = null;
+    if (surveyId) {
+      try {
+        const storedThreadId = localStorage.getItem(`survey_${surveyId}_thread_id`);
+        if (storedThreadId) {
+          threadId = storedThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+
+    // If not found in survey-specific storage, try general storage
+    if (!threadId) {
+      try {
+        const generalThreadId = localStorage.getItem("current_thread_id");
+        if (generalThreadId) {
+          threadId = generalThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+
+    if (!threadId) {
+      toast({
+        title: "Update not available",
+        description: "This survey was generated using fast mode (without planner API). The edit feature only works for surveys generated with the planner API (toggle ON in config page). Please regenerate the survey with the planner API enabled to use this feature.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Call the update API
+      const result = await updateSurveyPlan.mutateAsync({
+        thread_id: threadId,
+        update_instructions: editInputValue.trim(),
+      });
+
+      // Convert rendered_pages to the structure format expected by the UI
+      const updatedStructure = {
+        sections: result.rendered_pages.map((page) => ({
+          title: page.name,
+          questions: page.questions.map((q) => ({
+            text: q.question_text,
+            type: q.question_type,
+            options: q.options || [],
+            spec_id: q.spec_id,
+            required: q.required,
+            validation: q.validation,
+            skip_logic: q.skip_logic,
+            scale: q.scale,
+          })),
+        })),
+      };
+
+      // Update local structure immediately for responsive UI
+      setLocalStructure(updatedStructure);
+      prevStructureRef.current = JSON.stringify(updatedStructure);
+
+      // Update via API if available
+      if (survey?.id) {
+        await updateSurvey.mutateAsync({
+          id: survey.id,
+          structure: updatedStructure,
+        });
+      }
+
+      // Also update localStorage as fallback
+      if (surveyId) {
+        localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(updatedStructure));
+      }
+
+      // Show success message
+      toast({
+        title: "Survey updated",
+        description: result.status?.message || "Survey has been updated successfully.",
+      });
+
+      // Clear the input
+      setEditInputValue("");
+    } catch (error) {
+      // Error handling is done by the hook, but we can add additional logging
+      console.error("Failed to update survey plan:", error);
     }
   };
 
@@ -264,6 +404,66 @@ export default function BuilderPage() {
               })}
             </div>
           )}
+
+          {/* Edit input box at the bottom of the page */}
+          <div className="mt-8 space-y-2">
+            <label className="text-sm font-medium text-secondary">edit</label>
+            <div className="flex items-center gap-2">
+              <Input 
+                type="text" 
+                placeholder={hasThreadId ? "Enter your text here..." : "Edit feature requires planner API (generate with toggle ON)"}
+                className="flex-1"
+                value={editInputValue}
+                onChange={(e) => setEditInputValue(e.target.value)}
+                disabled={!hasThreadId}
+                onKeyDown={(e) => {
+                  // Allow submitting with Enter key (only if thread_id is available)
+                  if (e.key === "Enter" && hasThreadId) {
+                    handleArrowClick();
+                  }
+                }}
+              />
+              {/* Clickable arrow button */}
+              <button
+                onClick={handleArrowClick}
+                disabled={updateSurveyPlan.isPending || !hasThreadId}
+                className="flex items-center justify-center h-9 w-9 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Submit edit"
+                title={!hasThreadId ? "Edit feature requires planner API. Generate survey with toggle ON in config page." : "Submit edit"}
+              >
+                {updateSurveyPlan.isPending ? (
+                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ArrowRight className="w-4 h-4" />
+                )}
+              </button>
+            </div>
+            {!hasThreadId && (
+              <p className="text-xs text-muted-foreground">
+                This survey was generated using fast mode. To use the edit feature, regenerate the survey with the planner API enabled (toggle ON in config page).
+              </p>
+            )}
+          </div>
+
+          {/* Proceed to rules button */}
+          <div className="mt-6">
+            <Button
+              onClick={() => {
+                if (surveyId) {
+                  setLocation(`/rules/${surveyId}`);
+                } else {
+                  toast({
+                    title: "Error",
+                    description: "Survey ID not found. Cannot navigate to rules page.",
+                    variant: "destructive",
+                  });
+                }
+              }}
+              className="w-full"
+            >
+              proceed to rules
+            </Button>
+          </div>
         </main>
       </div>
 

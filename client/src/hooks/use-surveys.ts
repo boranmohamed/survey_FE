@@ -10,7 +10,7 @@ import {
 } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
 import { postSurveyPlanFast } from "@/lib/anomalyBackend";
-import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan } from "@/lib/plannerBackend";
+import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan } from "@/lib/plannerBackend";
 import { toPlannerLanguageCode } from "@/lib/language";
 
 // ============================================
@@ -702,6 +702,45 @@ export function useRejectSurveyPlan() {
       const errorMessage = error instanceof Error ? error.message : "Failed to reject survey plan. Please try again.";
       toast({
         title: "Rejection failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    },
+  });
+}
+
+/**
+ * Update a survey plan using the planner API.
+ * 
+ * This hook calls POST /api/upsert-survey/survey-plan/{thread_id}/update to update
+ * a survey plan from natural language instructions and returns rendered questions.
+ * 
+ * @returns Mutation hook for updating survey plans
+ */
+export function useUpdateSurveyPlan() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ thread_id, update_instructions }: { thread_id: string; update_instructions: string }) => {
+      try {
+        return await updateSurveyPlan(thread_id, update_instructions);
+      } catch (error) {
+        // Provide detailed error messages
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message = "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onError: (error) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to update survey plan. Please try again.";
+      toast({
+        title: "Update failed",
         description: errorMessage,
         variant: "destructive"
       });

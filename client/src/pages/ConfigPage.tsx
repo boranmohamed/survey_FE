@@ -46,6 +46,17 @@ const metadataSchema = z.object({
   type: z.string().min(1, "Type is required"),
   language: z.enum(["English", "Arabic", "Bilingual"]),
   collectionMode: z.enum(["field", "web"]),
+  nameEnglish: z.string().optional(),
+  nameArabic: z.string().optional(),
+}).refine((data) => {
+  // If bilingual, both names are required
+  if (data.language === "Bilingual") {
+    return data.nameEnglish && data.nameEnglish.length >= 3 && data.nameArabic && data.nameArabic.length >= 3;
+  }
+  return true;
+}, {
+  message: "Both English and Arabic names are required for bilingual surveys",
+  path: ["nameEnglish"],
 });
 
 type Step = "metadata" | "ai-config" | "blueprint";
@@ -90,8 +101,12 @@ export default function ConfigPage() {
       type: "",
       language: "English",
       collectionMode: "web",
+      nameArabic: "",
     },
   });
+
+  // Watch language field to conditionally show bilingual inputs
+  const selectedLanguage = form.watch("language");
 
   const handleMetadataSubmit = async (values: z.infer<typeof metadataSchema>) => {
     try {
@@ -189,15 +204,42 @@ export default function ConfigPage() {
         } else {
           // Direct save and proceed
           // Transform planner response to sections format for backward compatibility
+          // Handle both section_brief (new format) and question_specs (legacy format)
           const transformedPlan = {
-            sections: planResponse.plan.pages.map((page, idx) => ({
-              title: page.name || `Section ${idx + 1}`,
-              questions: page.question_specs.map((spec) => ({
-                text: spec.intent,
-                type: spec.question_type,
-                options: spec.options_hint && spec.options_hint.length > 0 ? spec.options_hint : undefined,
-              })),
-            })),
+            sections: planResponse.plan.pages.map((page, idx) => {
+              // If page has section_brief, create placeholder questions based on the brief
+              // Otherwise, use question_specs (legacy format)
+              if (page.section_brief) {
+                // For section_brief format, create a placeholder structure
+                // The actual questions will be generated later during approval
+                const questionCount = page.section_brief.question_count || 0;
+                return {
+                  title: page.name || `Section ${idx + 1}`,
+                  questions: Array.from({ length: questionCount }, (_, qIdx) => ({
+                    text: `Question ${qIdx + 1} (to be generated)`,
+                    type: 'text', // Default type, will be determined during generation
+                    // Include section_brief metadata for later use
+                    section_brief: page.section_brief,
+                  })),
+                };
+              } else if (page.question_specs && page.question_specs.length > 0) {
+                // Legacy format: use question_specs
+                return {
+                  title: page.name || `Section ${idx + 1}`,
+                  questions: page.question_specs.map((spec) => ({
+                    text: spec.intent,
+                    type: spec.question_type,
+                    options: spec.options_hint && spec.options_hint.length > 0 ? spec.options_hint : undefined,
+                  })),
+                };
+              } else {
+                // No section_brief or question_specs - create empty section
+                return {
+                  title: page.name || `Section ${idx + 1}`,
+                  questions: [],
+                };
+              }
+            }),
             suggestedName: planResponse.plan.title,
           };
 
@@ -213,6 +255,10 @@ export default function ConfigPage() {
           if (currentSurveyId) {
             try {
               localStorage.setItem(`survey_${currentSurveyId}_structure`, JSON.stringify(transformedPlan));
+              // Store thread_id for later use in BuilderPage
+              if (newThreadId) {
+                localStorage.setItem(`survey_${currentSurveyId}_thread_id`, newThreadId);
+              }
             } catch (e) {
               console.warn("Failed to save to localStorage:", e);
             }
@@ -455,29 +501,71 @@ export default function ConfigPage() {
             console.log("✅ Using generated_questions from approved plan");
           } else {
             // Fallback to original plan structure
+            // Handle both section_brief and question_specs formats
             transformedPlan = {
-              sections: approvedPlan.plan.pages.map((page, idx) => ({
-                title: page.name || `Section ${idx + 1}`,
-                questions: page.question_specs.map((spec) => ({
-                  text: spec.intent,
-                  type: spec.question_type,
-                  options: spec.options_hint && spec.options_hint.length > 0 ? spec.options_hint : undefined,
-                })),
-              })),
+              sections: approvedPlan.plan.pages.map((page, idx) => {
+                if (page.section_brief) {
+                  // For section_brief format, create placeholder structure
+                  const questionCount = page.section_brief.question_count || 0;
+                  return {
+                    title: page.name || `Section ${idx + 1}`,
+                    questions: Array.from({ length: questionCount }, (_, qIdx) => ({
+                      text: `Question ${qIdx + 1} (to be generated)`,
+                      type: 'text',
+                      section_brief: page.section_brief,
+                    })),
+                  };
+                } else if (page.question_specs && page.question_specs.length > 0) {
+                  return {
+                    title: page.name || `Section ${idx + 1}`,
+                    questions: page.question_specs.map((spec) => ({
+                      text: spec.intent,
+                      type: spec.question_type,
+                      options: spec.options_hint && spec.options_hint.length > 0 ? spec.options_hint : undefined,
+                    })),
+                  };
+                } else {
+                  return {
+                    title: page.name || `Section ${idx + 1}`,
+                    questions: [],
+                  };
+                }
+              }),
               suggestedName: approvedPlan.plan.title,
             };
           }
         } else {
           // Fallback to original plan structure (only has intent and options_hint)
+          // Handle both section_brief and question_specs formats
           transformedPlan = {
-            sections: approvedPlan.plan.pages.map((page, idx) => ({
-              title: page.name || `Section ${idx + 1}`,
-              questions: page.question_specs.map((spec) => ({
-                text: spec.intent,
-                type: spec.question_type,
-                options: spec.options_hint && spec.options_hint.length > 0 ? spec.options_hint : undefined,
-              })),
-            })),
+            sections: approvedPlan.plan.pages.map((page, idx) => {
+              if (page.section_brief) {
+                // For section_brief format, create placeholder structure
+                const questionCount = page.section_brief.question_count || 0;
+                return {
+                  title: page.name || `Section ${idx + 1}`,
+                  questions: Array.from({ length: questionCount }, (_, qIdx) => ({
+                    text: `Question ${qIdx + 1} (to be generated)`,
+                    type: 'text',
+                    section_brief: page.section_brief,
+                  })),
+                };
+              } else if (page.question_specs && page.question_specs.length > 0) {
+                return {
+                  title: page.name || `Section ${idx + 1}`,
+                  questions: page.question_specs.map((spec) => ({
+                    text: spec.intent,
+                    type: spec.question_type,
+                    options: spec.options_hint && spec.options_hint.length > 0 ? spec.options_hint : undefined,
+                  })),
+                };
+              } else {
+                return {
+                  title: page.name || `Section ${idx + 1}`,
+                  questions: [],
+                };
+              }
+            }),
             suggestedName: approvedPlan.plan.title,
           };
         }
@@ -495,6 +583,10 @@ export default function ConfigPage() {
         // Store structure in localStorage as fallback for mock mode
         try {
           localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(transformedPlan));
+          // Store thread_id for later use in BuilderPage
+          if (threadId) {
+            localStorage.setItem(`survey_${surveyId}_thread_id`, threadId);
+          }
         } catch (e) {
           console.warn("Failed to save to localStorage:", e);
         }
@@ -520,6 +612,10 @@ export default function ConfigPage() {
       if (surveyId) {
         try {
           localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(blueprint));
+          // Store thread_id for later use in BuilderPage (if available from rejected plan)
+          if (threadId) {
+            localStorage.setItem(`survey_${surveyId}_thread_id`, threadId);
+          }
         } catch (e) {
           console.warn("Failed to save to localStorage:", e);
         }
@@ -611,7 +707,7 @@ export default function ConfigPage() {
                           <FormLabel className="text-lg font-semibold text-secondary">Survey Name</FormLabel>
                           <FormControl>
                             <Input 
-                              placeholder="e.g. Employee Satisfaction Survey Q3" 
+                              placeholder={selectedLanguage === "Bilingual" ? "Survey Name in English*" : "e.g. Employee Satisfaction Survey Q3"} 
                               className="input-field text-lg" 
                               {...field} 
                             />
@@ -620,6 +716,26 @@ export default function ConfigPage() {
                         </FormItem>
                       )}
                     />
+
+                    {/* Arabic Name Field - Only show when Bilingual is selected */}
+                    {selectedLanguage === "Bilingual" && (
+                      <FormField
+                        control={form.control}
+                        name="nameArabic"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <Input 
+                                placeholder="Survey Name in Arabic*" 
+                                className="input-field text-lg" 
+                                {...field} 
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
 
                     {/* Survey Type */}
                     <FormField
@@ -655,28 +771,25 @@ export default function ConfigPage() {
                       render={({ field }) => (
                         <FormItem>
                           <FormLabel className="text-lg font-semibold text-secondary flex items-center gap-2">
-                            <Globe className="w-5 h-5 text-primary" /> Language
+                            <Globe className="w-5 h-5 text-primary" /> Survey Language*
                           </FormLabel>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            {["English", "Arabic", "Bilingual"].map((lang) => (
-                              <div
-                                key={lang}
-                                onClick={() => field.onChange(lang)}
-                                className={`
-                                  cursor-pointer p-4 rounded-xl border-2 text-center font-medium transition-all
-                                  ${field.value === lang 
-                                    ? "border-primary bg-primary/5 text-primary shadow-sm" 
-                                    : "border-gray-200 hover:border-primary/50 text-gray-600"}
-                                `}
-                              >
-                                {lang}
-                              </div>
-                            ))}
-                          </div>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Select a language" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="English">English</SelectItem>
+                              <SelectItem value="Arabic">Arabic</SelectItem>
+                              <SelectItem value="Bilingual">Bilingual</SelectItem>
+                            </SelectContent>
+                          </Select>
                           <FormMessage />
                         </FormItem>
                       )}
                     />
+
 
                     {/* Collection Mode */}
                     <FormField
@@ -761,37 +874,59 @@ export default function ConfigPage() {
 
                   {/* Prompt Input */}
                   <div className="space-y-3">
-                    <label className="text-lg font-semibold text-secondary flex justify-between items-center">
+                    <label className="text-lg font-semibold text-secondary">
                       Prompt Description
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="text-primary hover:text-primary/80 hover:bg-primary/5"
-                        onClick={handleRephraseClick}
-                        // Smart rephrase uses the built-in AI flow.
-                        // When the toggle is OFF, we are using the external backend and we disable this.
-                        disabled={!isPromptEnabled || !aiPrompt.trim() || rephrasePrompt.isPending}
-                      >
-                        <RefreshCw className={`w-4 h-4 mr-2 ${rephrasePrompt.isPending ? 'animate-spin' : ''}`} /> 
-                        {rephrasePrompt.isPending ? 'Rephrasing...' : 'Smart Rephrase'}
-                      </Button>
                     </label>
                     {/* Textarea container with toggle inside */}
                     <div className="relative">
                       <Textarea 
                         placeholder="e.g. Create a customer satisfaction survey for a luxury hotel chain focusing on check-in experience, room cleanliness, and dining options." 
-                        className="min-h-[160px] text-lg p-6 rounded-xl border-border bg-white shadow-sm resize-none focus:ring-2 focus:ring-primary/20"
+                        className="min-h-[160px] text-lg p-6 pr-24 rounded-xl border-border bg-white shadow-sm resize-none focus:ring-2 focus:ring-primary/20"
                         value={aiPrompt}
                         onChange={(e) => setAiPrompt(e.target.value)}
                       />
-                      {/* Toggle switch positioned inside textarea area at the bottom */}
-                      <div className="absolute bottom-4 right-4">
-                        <Switch
-                          checked={isPromptEnabled}
-                          onCheckedChange={setIsPromptEnabled}
-                          id="prompt-toggle"
-                        />
-                      </div>
+                      {/* Toggle switch and sparkle icon positioned inside textarea area at the bottom - Hidden when dialog is open */}
+                      {!showRephraseDialog && (
+                        <div 
+                          className="absolute bottom-4 right-4 flex items-center gap-3"
+                          style={{ 
+                            pointerEvents: 'auto',
+                            zIndex: 9999,
+                            isolation: 'isolate'
+                          }}
+                        >
+                          {/* Sparkle icon - clickable - calls Smart Rephrase API */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (!isPromptEnabled || !aiPrompt.trim() || rephrasePrompt.isPending) {
+                                return;
+                              }
+                              handleRephraseClick();
+                            }}
+                            disabled={!isPromptEnabled || !aiPrompt.trim() || rephrasePrompt.isPending}
+                            className="relative p-1.5 rounded-md hover:bg-primary/10 active:bg-primary/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-white shadow-md border border-primary/20"
+                            style={{ 
+                              pointerEvents: 'auto',
+                              zIndex: 10000,
+                              position: 'relative'
+                            }}
+                            aria-label="Smart Rephrase"
+                            title="Click to rephrase prompt"
+                          >
+                            <Sparkles className={`w-5 h-5 text-primary/60 hover:text-primary transition-colors ${rephrasePrompt.isPending ? 'animate-pulse' : ''}`} />
+                          </button>
+                          <div style={{ pointerEvents: 'auto', zIndex: 10000 }}>
+                            <Switch
+                              checked={isPromptEnabled}
+                              onCheckedChange={setIsPromptEnabled}
+                              id="prompt-toggle"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -844,7 +979,7 @@ export default function ConfigPage() {
             <DialogTitle>Smart Rephrase</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            {/* Original Prompt Section */}
+            {/* Original Prompt Section - Always show */}
             <div className="p-4 bg-muted/50 rounded-lg">
               <p className="text-sm text-muted-foreground mb-2 font-semibold">Original Prompt:</p>
               <p className="text-base">{aiPrompt || "No prompt entered yet."}</p>
@@ -858,7 +993,7 @@ export default function ConfigPage() {
               </div>
             ) : rephrasePrompt.data ? (
               <>
-                {/* Rewritten Prompt Section */}
+                {/* Rewritten Prompt Section - Only show when data is available */}
                 <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
                   <div className="flex justify-between items-center mb-2">
                     <p className="text-sm text-primary font-bold">Rewritten Prompt:</p>
@@ -869,8 +1004,8 @@ export default function ConfigPage() {
                   </p>
                 </div>
                 
-                {/* Rewrite Notes Section - Show if available */}
-                {rephrasePrompt.data.rewrite_notes && rephrasePrompt.data.rewrite_notes.length > 0 && (
+                {/* Rewrite Notes Section - Only show if notes are available */}
+                {rephrasePrompt.data.rewrite_notes && Array.isArray(rephrasePrompt.data.rewrite_notes) && rephrasePrompt.data.rewrite_notes.length > 0 && (
                   <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-sm text-blue-900 font-semibold mb-2">Improvements Made:</p>
                     <ul className="list-disc list-inside space-y-1">
@@ -881,13 +1016,7 @@ export default function ConfigPage() {
                   </div>
                 )}
               </>
-            ) : (
-              <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
-                <p className="text-sm text-muted-foreground">
-                  Click 'Smart Rephrase' to improve your prompt for better AI results.
-                </p>
-              </div>
-            )}
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setShowRephraseDialog(false)}>Cancel</Button>
@@ -896,7 +1025,8 @@ export default function ConfigPage() {
               disabled={rephrasePrompt.isPending || !rephrasePrompt.data}
               className="btn-primary"
             >
-              Use This Version
+              <Sparkles className="w-4 h-4 mr-2" />
+              Use Version
             </Button>
           </DialogFooter>
         </DialogContent>

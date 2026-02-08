@@ -37,10 +37,23 @@ export const planQuestionSpecSchema = z.object({
   options_hint: z.array(z.string()).default([]),
 });
 
+// Section brief schema - new format for page-level planning guidance
+// Used when planner provides high-level guidance instead of detailed question specs
+export const sectionBriefSchema = z.object({
+  question_count: z.number().optional(), // Expected number of questions for this section
+  summary: z.string().optional(), // Brief summary of what this section should cover
+  topics: z.array(z.string()).optional(), // Topics to cover in this section
+  guidance: z.array(z.string()).optional(), // Guidance for question generation
+  must_include: z.array(z.string()).optional(), // Topics/questions that must be included
+  avoid: z.array(z.string()).optional(), // Topics/questions to avoid
+});
+
 // Page structure from planner API
+// Supports both formats: question_specs (detailed) and section_brief (high-level guidance)
 export const planPageSchema = z.object({
   name: z.string(),
-  question_specs: z.array(planQuestionSpecSchema),
+  question_specs: z.array(planQuestionSpecSchema).optional(), // Detailed question specifications (legacy format)
+  section_brief: sectionBriefSchema.optional(), // High-level section guidance (new format)
 });
 
 // Plan rationale schema - explains the planning decisions
@@ -316,6 +329,7 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
 
 // Type exports
 export type PlanQuestionSpec = z.infer<typeof planQuestionSpecSchema>;
+export type SectionBrief = z.infer<typeof sectionBriefSchema>;
 export type PlanPage = z.infer<typeof planPageSchema>;
 export type PlanRationale = z.infer<typeof planRationaleSchema>;
 export type Plan = z.infer<typeof planSchema>;

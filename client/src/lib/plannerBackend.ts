@@ -4,7 +4,8 @@ import {
   type CreateSurveyPlanRequest, 
   type CreateSurveyPlanResponse,
   type SurveyPlanResponse,
-  type GenerateValidateFixResponse
+  type GenerateValidateFixResponse,
+  type RenderedPage
 } from "@shared/routes";
 
 /**
@@ -21,7 +22,8 @@ import {
  *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000/anomaly`
  */
 
-const DEFAULT_PLANNER_API_BASE_URL = "http://127.0.0.1:8000";
+// Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
+const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.70:8000";
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -645,6 +647,144 @@ export async function generateValidateFixQuestions(
   };
 
   console.log("✅ Normalized generate-validate-fix response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+
+/**
+ * Update a survey plan by calling the POST update endpoint.
+ * Updates the survey plan from natural language instructions, generates questions,
+ * and returns the rendered survey.
+ * 
+ * @param thread_id - The unique thread identifier for the plan to update
+ * @param update_instructions - Natural language instructions describing what to change
+ * @returns Response containing rendered pages with updated questions
+ */
+export async function updateSurveyPlan(
+  thread_id: string,
+  update_instructions: string,
+): Promise<{
+  meta?: any;
+  status: { code: string; message: string };
+  thread_id: string;
+  rendered_pages: RenderedPage[];
+  error: string | null;
+  validation?: any;
+  saved?: boolean;
+}> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/upsert-survey/survey-plan/${thread_id}/update`;
+  
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  const doPost = async (url: string) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        update_instructions: update_instructions,
+        // meta is optional - can be omitted
+      }),
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doPost(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+      
+      // Try to parse error response
+      let errorMessage = `Planner API error (${res.status}). ${text || res.statusText}`;
+      try {
+        const errorData = text ? JSON.parse(text) : null;
+        if (errorData?.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData?.status?.message) {
+          errorMessage = errorData.status.message;
+        }
+      } catch {
+        // Use default error message
+      }
+      throw new Error(errorMessage);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Planner API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full planner API update response:", JSON.stringify(finalJson, null, 2));
+
+  // Extract data from various possible response structures
+  if (!finalJson || typeof finalJson !== 'object') {
+    throw new Error("Planner API returned invalid response");
+  }
+
+  const response = finalJson as any;
+  
+  // Extract data from either data object or root level
+  const data = response.data || response;
+  
+  // Extract thread_id
+  const threadId = data.thread_id || response.thread_id || thread_id;
+  if (!threadId) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  // Extract rendered_pages
+  const renderedPages = data.rendered_pages || response.rendered_pages;
+  if (!renderedPages || !Array.isArray(renderedPages)) {
+    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rendered_pages");
+  }
+
+  // Return normalized response
+  const normalizedResponse = {
+    meta: response.meta,
+    status: response.status || { code: "success", message: "Survey updated successfully" },
+    thread_id: threadId,
+    rendered_pages: renderedPages,
+    error: data.error || response.error || null,
+    validation: data.validation || response.validation,
+    saved: data.saved !== undefined ? data.saved : response.saved,
+  };
+
+  console.log("✅ Normalized update response:", JSON.stringify(normalizedResponse, null, 2));
   return normalizedResponse;
 }
 

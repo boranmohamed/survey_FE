@@ -16,7 +16,9 @@ import { api, type GenerateSurveyRequest, type GenerateSurveyResponse } from "@s
  *   - `VITE_ANOMALY_API_BASE_URL=http://127.0.0.1:8000`
  */
 
-const DEFAULT_ANOMALY_API_BASE_URL = "http://127.0.0.1:8000/anomaly";
+// Default backend URL - can be overridden with VITE_ANOMALY_API_BASE_URL environment variable
+// If your backend uses the /anomaly prefix, keep it. Otherwise, remove /anomaly
+const DEFAULT_ANOMALY_API_BASE_URL = "http://192.168.2.70:8000";
 const SURVEY_PLAN_FAST_PATH = "/api/upsert-survey/survey-plan/fast";
 
 function joinUrl(base: string, path: string) {
@@ -130,22 +132,46 @@ function extractPlanCandidate(raw: unknown): unknown {
   if (r.surveyPlan?.sections && Array.isArray(r.surveyPlan.sections)) {
     return r.surveyPlan;
   }
-  // Handle plan.pages format (planner API format with question_specs)
+  // Handle plan.pages format (planner API format with question_specs or section_brief)
   if (r.plan?.pages && Array.isArray(r.plan.pages)) {
     return {
-      sections: r.plan.pages.map((page: any, idx: number) => ({
-        title: page.name || page.title || `Section ${idx + 1}`,
-        questions: (page.question_specs || []).map((spec: any) => ({
-          text: spec.intent || spec.question_text || spec.text || '',
-          type: spec.question_type || spec.type || 'text',
-          options: (spec.options_hint && Array.isArray(spec.options_hint) && spec.options_hint.length > 0) ? spec.options_hint : undefined,
-          required: spec.required !== undefined ? spec.required : undefined,
-          spec_id: spec.spec_id,
-          validation: spec.validation || undefined,
-          skip_logic: spec.skip_logic || undefined,
-          scale: spec.scale || undefined,
-        })),
-      })),
+      sections: r.plan.pages.map((page: any, idx: number) => {
+        // Check for section_brief first (new format)
+        if (page.section_brief) {
+          // For section_brief format, create placeholder questions based on question_count
+          const questionCount = page.section_brief.question_count || 0;
+          return {
+            title: page.name || page.title || `Section ${idx + 1}`,
+            questions: Array.from({ length: questionCount }, (_, qIdx: number) => ({
+              text: `Question ${qIdx + 1} (to be generated from section brief)`,
+              type: 'text', // Default type, will be determined during generation
+              // Include section_brief metadata for reference
+              section_brief: page.section_brief,
+            })),
+          };
+        } else if (page.question_specs && Array.isArray(page.question_specs) && page.question_specs.length > 0) {
+          // Legacy format: use question_specs
+          return {
+            title: page.name || page.title || `Section ${idx + 1}`,
+            questions: page.question_specs.map((spec: any) => ({
+              text: spec.intent || spec.question_text || spec.text || '',
+              type: spec.question_type || spec.type || 'text',
+              options: (spec.options_hint && Array.isArray(spec.options_hint) && spec.options_hint.length > 0) ? spec.options_hint : undefined,
+              required: spec.required !== undefined ? spec.required : undefined,
+              spec_id: spec.spec_id,
+              validation: spec.validation || undefined,
+              skip_logic: spec.skip_logic || undefined,
+              scale: spec.scale || undefined,
+            })),
+          };
+        } else {
+          // No section_brief or question_specs - create empty section
+          return {
+            title: page.name || page.title || `Section ${idx + 1}`,
+            questions: [],
+          };
+        }
+      }),
       suggestedName: r.plan.title || r.suggestedName || r.name,
     };
   }

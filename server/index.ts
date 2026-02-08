@@ -31,6 +31,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { networkInterfaces } from "os";
 
 const app = express();
 const httpServer = createServer(app);
@@ -52,11 +53,24 @@ app.use(
 app.use(express.urlencoded({ extended: false }));
 
 // CORS middleware - allow requests from the same origin and handle preflight requests
+// Updated to allow network access from other devices on the same network
 app.use((req, res, next) => {
-  // Allow requests from the same origin (localhost with any port)
+  // Allow requests from the same origin (localhost with any port) or from network IPs
   const origin = req.headers.origin;
   if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
+    // Allow requests from localhost, 127.0.0.1, or any IP on the local network
+    const allowedOrigins = [
+      /^http:\/\/localhost(:\d+)?$/,
+      /^http:\/\/127\.0\.0\.1(:\d+)?$/,
+      /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/, // Local network IPs (192.168.x.x)
+      /^http:\/\/10\.\d+\.\d+\.\d+(:\d+)?$/,  // Private network IPs (10.x.x.x)
+      /^http:\/\/172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+(:\d+)?$/, // Private network IPs (172.16-31.x.x)
+    ];
+    
+    const isAllowed = allowedOrigins.some(pattern => pattern.test(origin));
+    if (isAllowed) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    }
   }
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -79,6 +93,27 @@ export function log(message: string, source = "express") {
   });
 
   console.log(`${formattedTime} [${source}] ${message}`);
+}
+
+/**
+ * Get the local IP address for network access.
+ * Returns the first non-internal IPv4 address found.
+ */
+function getLocalIPAddress(): string {
+  const interfaces = networkInterfaces();
+  for (const name of Object.keys(interfaces)) {
+    const nets = interfaces[name];
+    if (!nets) continue;
+    
+    for (const net of nets) {
+      // Skip internal (loopback) and non-IPv4 addresses
+      if (net.family === "IPv4" && !net.internal) {
+        return net.address;
+      }
+    }
+  }
+  // Fallback to localhost if no network IP found
+  return "localhost";
 }
 
 app.use((req, res, next) => {
@@ -138,11 +173,16 @@ app.use((req, res, next) => {
   // this serves both the API and the client.
   // It is the only port that is not firewalled.
   const port = parseInt(process.env.PORT || "5000", 10);
+  // Listen on 0.0.0.0 to allow network access (not just localhost)
+  // This makes the server accessible from other devices on the same network
+  const host = process.env.HOST || "0.0.0.0";
   httpServer.listen(
     port,
-    "localhost",
+    host,
     () => {
       log(`serving on http://localhost:${port}`);
+      log(`Network access: http://${getLocalIPAddress()}:${port}`);
+      log(`Share this URL with others on your network`);
     },
   );
 })();

@@ -121,194 +121,210 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
           {/* Metadata badges */}
           <div className="flex flex-wrap gap-3">
             <Badge variant="outline">
-              Attempt: {plannerPlan.attempt}
+              Attempt: {plannerPlan.attempt}:3
             </Badge>
           </div>
         </div>
 
-        {/* Plan Overview */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5" /> Plan Overview
-            </CardTitle>
-            <CardDescription>Basic information about the survey plan</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Title</p>
-                <p className="text-base font-semibold">{planData.title}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Type</p>
-                <p className="text-base font-semibold">{planData.type}</p>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Language</p>
-                <p className="text-base font-semibold">{planData.language}</p>
-              </div>
-            </div>
-            {planData.estimated_question_count && (
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Estimated Questions</p>
-                <p className="text-base font-semibold">{planData.estimated_question_count}</p>
-              </div>
-            )}
-            {(planData.suggested_number_of_pages !== null || planData.final_number_of_pages !== null) && (
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Pages</p>
-                <div className="space-y-1">
-                  {planData.suggested_number_of_pages !== null && (
-                    <p className="text-base font-semibold text-primary">Suggested: {planData.suggested_number_of_pages}</p>
+        {/* Plan Overview - Collapsible */}
+        <Accordion type="single" collapsible className="w-full">
+          <AccordionItem value="plan-overview" className="border-none">
+            <Card>
+              <CardHeader className="pb-3">
+                <AccordionTrigger className="hover:no-underline py-0">
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5" /> Plan Overview
+                  </CardTitle>
+                </AccordionTrigger>
+                <CardDescription className="pt-1">Basic information about the survey plan</CardDescription>
+              </CardHeader>
+              <AccordionContent>
+                <CardContent className="space-y-4 pt-0">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Title</p>
+                      <p className="text-base font-semibold">{planData.title}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Type</p>
+                      <p className="text-base font-semibold">{planData.type}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Language</p>
+                      <p className="text-base font-semibold">{planData.language}</p>
+                    </div>
+                  </div>
+                  {planData.estimated_question_count && (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Estimated Questions</p>
+                      <p className="text-base font-semibold">{planData.estimated_question_count}</p>
+                    </div>
                   )}
-                  {planData.final_number_of_pages !== null && (
-                    <p className="text-base font-semibold text-green-600">Final: {planData.final_number_of_pages}</p>
-                  )}
-                </div>
-              </div>
-            )}
-            {planData.notes && (
-              <div>
-                <p className="text-sm font-medium text-muted-foreground">Notes</p>
-                <p className="text-base">{planData.notes}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Plan Rationale - Complete Planning Explanation */}
-        {planData.plan_rationale && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Info className="w-5 h-5" /> Planning Rationale
-              </CardTitle>
-              <CardDescription>
-                Detailed explanation of the planning decisions and approach
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Summary Section - Combined: Summary text, Page and Count Reasoning, and Survey Context Insights */}
-              {(planData.plan_rationale.summary || 
-                (planData.plan_rationale.page_and_count_reasoning && planData.plan_rationale.page_and_count_reasoning.length > 0) ||
-                planData.plan_rationale.contextual_insights) && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-4">Summary</h4>
-                  <div className="space-y-4">
-                    {/* Summary text */}
-                    {planData.plan_rationale.summary && (
-                      <p className="text-base leading-relaxed text-foreground">
-                        {planData.plan_rationale.summary}
-                      </p>
-                    )}
-
-                    {/* Page and Count Reasoning */}
-                    {planData.plan_rationale.page_and_count_reasoning && 
-                     planData.plan_rationale.page_and_count_reasoning.length > 0 && (
-                      <div>
-                        <h5 className="font-medium text-foreground mb-2 text-sm">Page and Count Reasoning</h5>
-                        <ul className="space-y-2">
-                          {planData.plan_rationale.page_and_count_reasoning.map((reason: string, idx: number) => (
-                            <li key={idx} className="flex gap-2 text-foreground">
-                              <span className="text-primary mt-1">•</span>
-                              <span className="flex-1">{reason}</span>
-                            </li>
-                          ))}
-                        </ul>
+                  {(planData.suggested_number_of_pages !== null || planData.final_number_of_pages !== null) && (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Pages</p>
+                      <div className="space-y-1">
+                        {planData.suggested_number_of_pages !== null && (
+                          <p className="text-base font-semibold text-primary">Suggested: {planData.suggested_number_of_pages}</p>
+                        )}
+                        {planData.final_number_of_pages !== null && (
+                          <p className="text-base font-semibold text-green-600">Final: {planData.final_number_of_pages}</p>
+                        )}
                       </div>
-                    )}
+                    </div>
+                  )}
+                  {planData.notes && (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Notes</p>
+                      <p className="text-base">{planData.notes}</p>
+                    </div>
+                  )}
+                </CardContent>
+              </AccordionContent>
+            </Card>
+          </AccordionItem>
+        </Accordion>
 
-                    {/* Survey Context Insights */}
-                    {planData.plan_rationale.contextual_insights && (
+        {/* Plan Rationale - Complete Planning Explanation - Collapsible */}
+        {planData.plan_rationale && (
+          <Accordion type="single" collapsible className="w-full">
+            <AccordionItem value="planning-rationale" className="border-none">
+              <Card>
+                <CardHeader className="pb-3">
+                  <AccordionTrigger className="hover:no-underline py-0">
+                    <CardTitle className="flex items-center gap-2">
+                      <Info className="w-5 h-5" /> Planning Rationale
+                    </CardTitle>
+                  </AccordionTrigger>
+                  <CardDescription className="pt-1">
+                    Detailed explanation of the planning decisions and approach
+                  </CardDescription>
+                </CardHeader>
+                <AccordionContent>
+                  <CardContent className="space-y-6 pt-0">
+                    {/* Summary Section - Combined: Summary text, Page and Count Reasoning, and Survey Context Insights */}
+                    {(planData.plan_rationale.summary || 
+                      (planData.plan_rationale.page_and_count_reasoning && planData.plan_rationale.page_and_count_reasoning.length > 0) ||
+                      planData.plan_rationale.contextual_insights) && (
                       <div>
-                        <h5 className="font-medium text-foreground mb-2 text-sm">Survey Context Insights</h5>
-                        <div className="space-y-2">
-                          {planData.plan_rationale.contextual_insights.title && (
+                        <h4 className="font-semibold text-foreground mb-4">Summary</h4>
+                        <div className="space-y-4">
+                          {/* Summary text */}
+                          {planData.plan_rationale.summary && (
+                            <p className="text-base leading-relaxed text-foreground">
+                              {planData.plan_rationale.summary}
+                            </p>
+                          )}
+
+                          {/* Page and Count Reasoning */}
+                          {planData.plan_rationale.page_and_count_reasoning && 
+                           planData.plan_rationale.page_and_count_reasoning.length > 0 && (
                             <div>
-                              <p className="text-sm font-medium text-muted-foreground">Title:</p>
-                              <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.title}</p>
+                              <h5 className="font-medium text-foreground mb-2 text-sm">Page and Count Reasoning</h5>
+                              <ul className="space-y-2">
+                                {planData.plan_rationale.page_and_count_reasoning.map((reason: string, idx: number) => (
+                                  <li key={idx} className="flex gap-2 text-foreground">
+                                    <span className="text-primary mt-1">•</span>
+                                    <span className="flex-1">{reason}</span>
+                                  </li>
+                                ))}
+                              </ul>
                             </div>
                           )}
-                          {planData.plan_rationale.contextual_insights.type && (
+
+                          {/* Survey Context Insights */}
+                          {planData.plan_rationale.contextual_insights && (
                             <div>
-                              <p className="text-sm font-medium text-muted-foreground">Type:</p>
-                              <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.type}</p>
-                            </div>
-                          )}
-                          {planData.plan_rationale.contextual_insights.language && (
-                            <div>
-                              <p className="text-sm font-medium text-muted-foreground">Language:</p>
-                              <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.language}</p>
+                              <h5 className="font-medium text-foreground mb-2 text-sm">Survey Context Insights</h5>
+                              <div className="space-y-2">
+                                {planData.plan_rationale.contextual_insights.title && (
+                                  <div>
+                                    <p className="text-sm font-medium text-muted-foreground">Title:</p>
+                                    <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.title}</p>
+                                  </div>
+                                )}
+                                {planData.plan_rationale.contextual_insights.type && (
+                                  <div>
+                                    <p className="text-sm font-medium text-muted-foreground">Type:</p>
+                                    <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.type}</p>
+                                  </div>
+                                )}
+                                {planData.plan_rationale.contextual_insights.language && (
+                                  <div>
+                                    <p className="text-sm font-medium text-muted-foreground">Language:</p>
+                                    <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.language}</p>
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
                       </div>
                     )}
-                  </div>
-                </div>
-              )}
 
-              {/* Question Type Reasoning - Collapsible */}
-              {planData.plan_rationale.question_type_reasoning && 
-               Array.isArray(planData.plan_rationale.question_type_reasoning) &&
-               planData.plan_rationale.question_type_reasoning.length > 0 && (
-                <Accordion type="single" collapsible className="w-full">
-                  <AccordionItem value="question-type-reasoning" className="border-none">
-                    <AccordionTrigger className="py-2 hover:no-underline">
-                      <h4 className="font-semibold text-foreground">Question Type Reasoning</h4>
-                    </AccordionTrigger>
-                    <AccordionContent className="pt-2">
-                      <div className="space-y-3">
-                        {planData.plan_rationale.question_type_reasoning.map((reason: any, idx: number) => {
-                          // Check if reason is an object with question_type and why
-                          if (typeof reason === 'object' && reason !== null && 'question_type' in reason && 'why' in reason) {
-                            return (
-                              <div key={idx} className="bg-muted/50 rounded-lg p-4 border border-border">
-                                <div className="flex items-start gap-3">
-                                  <Badge variant="secondary" className="mt-0.5 flex-shrink-0 capitalize">
-                                    {reason.question_type}
-                                  </Badge>
-                                  <div className="flex-1">
-                                    <p className="text-foreground leading-relaxed">{reason.why}</p>
+                    {/* Question Type Reasoning - Collapsible */}
+                    {planData.plan_rationale.question_type_reasoning && 
+                     Array.isArray(planData.plan_rationale.question_type_reasoning) &&
+                     planData.plan_rationale.question_type_reasoning.length > 0 && (
+                      <Accordion type="single" collapsible className="w-full">
+                        <AccordionItem value="question-type-reasoning" className="border-none">
+                          <AccordionTrigger className="py-2 hover:no-underline">
+                            <h4 className="font-semibold text-foreground">Question Type Reasoning</h4>
+                          </AccordionTrigger>
+                          <AccordionContent className="pt-2">
+                            <div className="space-y-3">
+                              {planData.plan_rationale.question_type_reasoning.map((reason: any, idx: number) => {
+                                // Check if reason is an object with question_type and why
+                                if (typeof reason === 'object' && reason !== null && 'question_type' in reason && 'why' in reason) {
+                                  return (
+                                    <div key={idx} className="bg-muted/50 rounded-lg p-4 border border-border">
+                                      <div className="flex items-start gap-3">
+                                        <Badge variant="secondary" className="mt-0.5 flex-shrink-0 capitalize">
+                                          {reason.question_type}
+                                        </Badge>
+                                        <div className="flex-1">
+                                          <p className="text-foreground leading-relaxed">{reason.why}</p>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                }
+                                // Fallback for string or other formats
+                                return (
+                                  <div key={idx} className="flex gap-2 text-foreground">
+                                    <span className="text-primary mt-1">•</span>
+                                    <span className="flex-1">
+                                      {typeof reason === 'string' ? reason : JSON.stringify(reason, null, 2)}
+                                    </span>
                                   </div>
-                                </div>
-                              </div>
-                            );
-                          }
-                          // Fallback for string or other formats
-                          return (
-                            <div key={idx} className="flex gap-2 text-foreground">
-                              <span className="text-primary mt-1">•</span>
-                              <span className="flex-1">
-                                {typeof reason === 'string' ? reason : JSON.stringify(reason, null, 2)}
-                              </span>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
-                </Accordion>
-              )}
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    )}
 
-              {/* Assumptions */}
-              {planData.plan_rationale.assumptions && 
-               planData.plan_rationale.assumptions.length > 0 && (
-                <div>
-                  <h4 className="font-semibold text-foreground mb-2">Assumptions</h4>
-                  <ul className="space-y-2">
-                    {planData.plan_rationale.assumptions.map((assumption: string, idx: number) => (
-                      <li key={idx} className="flex gap-2 text-foreground">
-                        <span className="text-primary mt-1">•</span>
-                        <span className="flex-1">{assumption}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    {/* Assumptions */}
+                    {planData.plan_rationale.assumptions && 
+                     planData.plan_rationale.assumptions.length > 0 && (
+                      <div>
+                        <h4 className="font-semibold text-foreground mb-2">Assumptions</h4>
+                        <ul className="space-y-2">
+                          {planData.plan_rationale.assumptions.map((assumption: string, idx: number) => (
+                            <li key={idx} className="flex gap-2 text-foreground">
+                              <span className="text-primary mt-1">•</span>
+                              <span className="flex-1">{assumption}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </CardContent>
+                </AccordionContent>
+              </Card>
+            </AccordionItem>
+          </Accordion>
         )}
 
         {/* Debug card: Show what data we have to help diagnose missing plan_rationale */}
@@ -382,11 +398,81 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                   Page {pageIdx + 1}: {page.name}
                 </h3>
                 <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground bg-white px-3 py-1 rounded-full border border-border">
-                  {page.question_specs.length} Questions
+                  {/* Show question count from section_brief or question_specs */}
+                  {page.section_brief?.question_count ?? (page.question_specs?.length ?? 0)} Questions
                 </span>
               </div>
               <div className="p-6 space-y-4">
-                {page.question_specs.map((spec: PlanQuestionSpec, specIdx: number) => (
+                {/* Check for section_brief first (new format) */}
+                {page.section_brief ? (
+                  <div className="bg-muted/50 rounded-lg p-6 border border-border">
+                    <div className="font-semibold text-foreground mb-4 text-base">
+                      Section Brief ({page.section_brief.question_count ?? 0} questions)
+                    </div>
+                    
+                    {page.section_brief.summary && (
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-muted-foreground mb-1">Summary:</p>
+                        <p className="text-base text-foreground">{page.section_brief.summary}</p>
+                      </div>
+                    )}
+                    
+                    {page.section_brief.topics && page.section_brief.topics.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Topics:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {page.section_brief.topics.map((topic: string, topicIdx: number) => (
+                            <Badge key={topicIdx} variant="outline" className="text-xs">
+                              {topic}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {page.section_brief.guidance && page.section_brief.guidance.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Guidance:</p>
+                        <ul className="space-y-1">
+                          {page.section_brief.guidance.map((guideline: string, guideIdx: number) => (
+                            <li key={guideIdx} className="flex gap-2 text-foreground text-sm">
+                              <span className="text-primary mt-1">•</span>
+                              <span className="flex-1">{guideline}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    
+                    {page.section_brief.must_include && page.section_brief.must_include.length > 0 && (
+                      <div className="mb-4">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Must Include:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {page.section_brief.must_include.map((item: string, itemIdx: number) => (
+                            <Badge key={itemIdx} variant="secondary" className="text-xs bg-green-100 text-green-800">
+                              {item}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    
+                    {page.section_brief.avoid && page.section_brief.avoid.length > 0 && (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Avoid:</p>
+                        <div className="flex flex-wrap gap-2">
+                          {page.section_brief.avoid.map((item: string, itemIdx: number) => (
+                            <Badge key={itemIdx} variant="secondary" className="text-xs bg-red-100 text-red-800">
+                              {item}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : page.question_specs && page.question_specs.length > 0 ? (
+                  // Fall back to question_specs for backward compatibility
+                  page.question_specs.map((spec: PlanQuestionSpec, specIdx: number) => (
                   <div key={specIdx} className="flex gap-4 items-start group">
                     <div className="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center flex-shrink-0 font-bold text-sm">
                       {specIdx + 1}
@@ -430,7 +516,13 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <Edit2 className="w-4 h-4 text-muted-foreground" />
                     </Button>
                   </div>
-                ))}
+                  ))
+                ) : (
+                  // No section_brief or question_specs available
+                  <div className="text-muted-foreground text-sm italic">
+                    No questions or section brief available for this page
+                  </div>
+                )}
               </div>
             </motion.div>
           ))}
