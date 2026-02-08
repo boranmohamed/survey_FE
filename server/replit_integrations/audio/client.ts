@@ -6,8 +6,12 @@ import { randomUUID } from "crypto";
 import { tmpdir } from "os";
 import { join } from "path";
 
+// Check for both AI_INTEGRATIONS_OPENAI_API_KEY and OPENAI_API_KEY
+// This allows users to use either environment variable name
+const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
 export const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+  apiKey: apiKey,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 

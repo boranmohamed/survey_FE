@@ -1,0 +1,6 @@
+{
+  // Configure CSS linter to ignore Tailwind CSS custom at-rules
+  // This prevents warnings for @tailwind and @apply directives
+  "css.lint.unknownAtRules": "ignore"
+}
+

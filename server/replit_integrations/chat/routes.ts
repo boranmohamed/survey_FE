@@ -5,16 +5,20 @@ import { chatStorage } from "./storage";
 let openai: OpenAI | null = null;
 
 function initializeOpenAI() {
-  if (!process.env.AI_INTEGRATIONS_OPENAI_API_KEY) {
+  // Check for both AI_INTEGRATIONS_OPENAI_API_KEY and OPENAI_API_KEY
+  // This allows users to use either environment variable name
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+  
+  if (!apiKey) {
     console.warn(
-      "⚠️  AI_INTEGRATIONS_OPENAI_API_KEY is not set. AI chat features will be unavailable.",
+      "⚠️  AI_INTEGRATIONS_OPENAI_API_KEY or OPENAI_API_KEY is not set. AI chat features will be unavailable.",
     );
     return;
   }
 
   try {
     openai = new OpenAI({
-      apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
+      apiKey: apiKey,
       baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
     });
   } catch (error) {
@@ -22,9 +26,12 @@ function initializeOpenAI() {
   }
 }
 
-initializeOpenAI();
+// Don't initialize at module load time - initialization will be called from registerChatRoutes
 
 export function registerChatRoutes(app: Express): void {
+  // Initialize OpenAI now that dotenv has loaded environment variables
+  initializeOpenAI();
+  
   // Get all conversations
   app.get("/api/conversations", async (req: Request, res: Response) => {
     try {
@@ -103,7 +110,7 @@ export function registerChatRoutes(app: Express): void {
       }
 
       const stream = await openai.chat.completions.create({
-        model: "gpt-5.1",
+        model: "gpt-4.1-mini",
         messages: chatMessages,
         stream: true,
         max_completion_tokens: 2048,

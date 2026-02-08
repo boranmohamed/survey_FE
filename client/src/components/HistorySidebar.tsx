@@ -5,7 +5,8 @@ import { format } from "date-fns";
 import { useSurveys } from "@/hooks/use-surveys";
 
 export function HistorySidebar() {
-  const [isOpen, setIsOpen] = useState(true);
+  // Sidebar starts closed by default - only opens when user clicks the toggle button
+  const [isOpen, setIsOpen] = useState(false);
   const { data: surveys } = useSurveys();
 
   return (
