@@ -1,10 +1,10 @@
 import { useState, useEffect } from "react";
-import { useRoute } from "wouter";
+import { useRoute, useLocation } from "wouter";
 import { Type, Loader2, CheckCircle2, AlertCircle, Eye, EyeOff, Lock, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HistorySidebar } from "@/components/HistorySidebar";
-import { useGenerateSurveyRules } from "@/hooks/use-surveys";
+import { useGenerateSurveyRules, useGenerateQuestions, useUpdateSurvey, PromptValidationError } from "@/hooks/use-surveys";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
  */
 export default function RulesPage() {
   const [, params] = useRoute("/rules/:id");
+  const [, setLocation] = useLocation();
   const surveyId = params?.id ? Number(params.id) : null;
   const { toast } = useToast();
   
@@ -77,8 +78,10 @@ export default function RulesPage() {
     };
   } | null>(null);
   
-  // Hook for generating rules
+  // Hooks for generating rules and questions
   const generateRules = useGenerateSurveyRules();
+  const generateQuestions = useGenerateQuestions();
+  const updateSurvey = useUpdateSurvey();
 
   /**
    * Get thread_id from localStorage on mount and when surveyId changes
@@ -150,10 +153,121 @@ export default function RulesPage() {
       // Store the generated rules to display them
       setGeneratedRules(response);
     } catch (error) {
+      // Check if this is a prompt validation error with a suggested prompt
+      if (error instanceof PromptValidationError && error.suggestedPrompt) {
+        // Update the prompt input with the suggested prompt
+        setRuleRequirements(error.suggestedPrompt);
+        // The error toast is already shown by the hook's onError handler
+        console.log("📝 Updated rule requirements with suggestion:", error.suggestedPrompt);
+      }
       // Error is handled by the hook's onError callback (toast notification)
       console.error("Error generating rules:", error);
       // Clear rules on error
       setGeneratedRules(null);
+    }
+  };
+
+  /**
+   * Handle generate survey button click
+   * Generates questions, combines with rules, saves the complete survey, and navigates to builder
+   */
+  const handleGenerateSurvey = async () => {
+    // Validate required data
+    if (!threadId) {
+      toast({
+        title: "Thread ID not found",
+        description: "This survey was generated using fast mode (without planner API). Survey generation requires a survey generated with the planner API (toggle ON in config page). Please regenerate the survey with the planner API enabled.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!surveyId) {
+      toast({
+        title: "Survey ID not found",
+        description: "Cannot generate survey without a survey ID. Please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!generatedRules || !generatedRules.rules?.survey_rules || generatedRules.rules.survey_rules.length === 0) {
+      toast({
+        title: "Rules not found",
+        description: "Please generate rules before generating the survey.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      // Step 1: Generate questions
+      console.log("🔵 Generating survey questions...");
+      const questionsResponse = await generateQuestions.mutateAsync(threadId);
+      
+      if (!questionsResponse.rendered_pages || questionsResponse.rendered_pages.length === 0) {
+        throw new Error("No questions were generated. Please try again.");
+      }
+
+      // Step 2: Transform rendered_pages to survey structure format
+      // Follow the pattern from ConfigPage.tsx handleBlueprintApprove()
+      const transformedPlan = {
+        sections: questionsResponse.rendered_pages.map((page, idx) => ({
+          title: page.name || `Section ${idx + 1}`,
+          questions: page.questions.map((question) => ({
+            text: question.question_text,
+            type: question.question_type,
+            options: question.options && question.options.length > 0 ? question.options : undefined,
+            required: question.required,
+            // Include additional metadata fields
+            spec_id: question.spec_id || undefined,
+            scale: question.scale || undefined,
+            validation: question.validation || undefined,
+            skip_logic: question.skip_logic || undefined,
+          })),
+        })),
+        // Add rules to the structure
+        rules: generatedRules.rules.survey_rules,
+        rules_metadata: {
+          thread_id: generatedRules.thread_id,
+          critique_summary: generatedRules.critique_summary,
+        },
+      };
+
+      // Step 3: Save the complete survey structure (questions + rules)
+      try {
+        await updateSurvey.mutateAsync({ 
+          id: surveyId, 
+          structure: transformedPlan 
+        });
+      } catch (updateError) {
+        // Show warning but continue - similar to ConfigPage pattern
+        console.warn("Survey update failed, continuing in frontend-only mode:", updateError);
+        toast({
+          title: "Warning",
+          description: "Survey structure saved locally but may not have been saved to the database.",
+          variant: "default",
+        });
+      }
+
+      // Step 4: Store structure in localStorage as fallback
+      try {
+        localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(transformedPlan));
+        // Store thread_id for later use in BuilderPage
+        if (threadId) {
+          localStorage.setItem(`survey_${surveyId}_thread_id`, threadId);
+        }
+      } catch (e) {
+        console.warn("Failed to save to localStorage:", e);
+      }
+
+      // Step 5: Navigate to builder page
+      console.log("✅ Survey generated successfully, navigating to builder...");
+      setLocation(`/builder/${surveyId}`);
+    } catch (error) {
+      // Error handling - the hook's onError will show a toast, but we can add additional context
+      console.error("❌ Error generating survey:", error);
+      // Don't navigate on error - let user see the error and try again
     }
   };
 
@@ -374,6 +488,25 @@ export default function RulesPage() {
 
       {/* Right Sidebar - History */}
       <HistorySidebar />
+
+      {/* Fixed Generate Survey Button - Bottom Right Corner */}
+      {/* Only show button when rules have been generated */}
+      {generatedRules && generatedRules.rules?.survey_rules && generatedRules.rules.survey_rules.length > 0 && (
+        <Button
+          className="fixed bottom-6 right-6 bg-[#4FD1C7] hover:bg-[#38B2AC] text-white border-0 shadow-lg z-50 px-6 py-3 text-base font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={handleGenerateSurvey}
+          disabled={generateQuestions.isPending || !threadId || !surveyId}
+        >
+          {generateQuestions.isPending ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Generating...
+            </>
+          ) : (
+            "Generate survey"
+          )}
+        </Button>
+      )}
     </div>
   );
 }

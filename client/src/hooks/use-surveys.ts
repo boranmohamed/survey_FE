@@ -10,8 +10,12 @@ import {
 } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
 import { postSurveyPlanFast } from "@/lib/anomalyBackend";
-import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan, generateSurveyRules } from "@/lib/plannerBackend";
+import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan, generateSurveyRules, generateQuestions } from "@/lib/plannerBackend";
 import { toPlannerLanguageCode } from "@/lib/language";
+import { PromptValidationError } from "@/lib/promptValidationError";
+
+// Export PromptValidationError for use in UI components
+export { PromptValidationError } from "@/lib/promptValidationError";
 
 // ============================================
 // SURVEY HOOKS
@@ -414,20 +418,30 @@ export function useGenerateSurveyFast() {
   return useMutation({
     mutationFn: async (data: GenerateSurveyRequest) => postSurveyPlanFast(data),
     onError: (error) => {
-      // Provide more detailed error messages
-      let message = "An unknown error occurred";
-      if (error instanceof TypeError && error.message.includes("fetch")) {
-        message = "Failed to fetch: Could not reach the external backend. Check if the backend is running and the URL is correct.";
-      } else if (error instanceof Error) {
-        message = error.message;
+      // Check if this is a prompt validation error
+      if (error instanceof PromptValidationError) {
+        // Show the user-friendly validation message
+        toast({ 
+          title: "Invalid prompt", 
+          description: error.message, 
+          variant: "destructive" 
+        });
       } else {
-        message = String(error);
+        // Provide more detailed error messages for other errors
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message = "Failed to fetch: Could not reach the external backend. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        toast({ 
+          title: "Generation failed", 
+          description: message, 
+          variant: "destructive" 
+        });
       }
-      toast({ 
-        title: "Generation failed", 
-        description: message, 
-        variant: "destructive" 
-      });
     },
   });
 }
@@ -446,7 +460,12 @@ export function useCreateSurveyPlan() {
       try {
         return await createSurveyPlan(data);
       } catch (error) {
-        // Provide detailed error messages
+        // Preserve PromptValidationError so UI components can access suggested_prompt
+        if (error instanceof PromptValidationError) {
+          throw error;
+        }
+        
+        // Provide detailed error messages for other errors
         let message = "An unknown error occurred";
         if (error instanceof TypeError && error.message.includes("fetch")) {
           message = "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
@@ -459,12 +478,23 @@ export function useCreateSurveyPlan() {
       }
     },
     onError: (error) => {
-      const errorMessage = error instanceof Error ? error.message : "Failed to create survey plan. Please try again.";
-      toast({
-        title: "Plan creation failed",
-        description: errorMessage,
-        variant: "destructive"
-      });
+      // Check if this is a prompt validation error
+      if (error instanceof PromptValidationError) {
+        // Show the user-friendly validation message
+        toast({
+          title: "Invalid prompt",
+          description: error.message,
+          variant: "destructive"
+        });
+      } else {
+        // Handle other errors normally
+        const errorMessage = error instanceof Error ? error.message : "Failed to create survey plan. Please try again.";
+        toast({
+          title: "Plan creation failed",
+          description: errorMessage,
+          variant: "destructive"
+        });
+      }
     },
   });
 }
@@ -775,7 +805,12 @@ export function useGenerateSurveyRules() {
           expected_rules_count,
         });
       } catch (error) {
-        // Provide detailed error messages
+        // Preserve PromptValidationError so UI components can access suggested_prompt
+        if (error instanceof PromptValidationError) {
+          throw error;
+        }
+        
+        // Provide detailed error messages for other errors
         let message = "An unknown error occurred";
         if (error instanceof TypeError && error.message.includes("fetch")) {
           message = "Failed to fetch: Could not reach the rules generation API. Check if the backend is running and the URL is correct.";
@@ -796,9 +831,71 @@ export function useGenerateSurveyRules() {
       });
     },
     onError: (error) => {
-      const errorMessage = error instanceof Error ? error.message : "Failed to generate survey rules. Please try again.";
+      // Check if this is a prompt validation error
+      if (error instanceof PromptValidationError) {
+        // Show the user-friendly validation message
+        toast({
+          title: "Invalid prompt",
+          description: error.message,
+          variant: "destructive"
+        });
+      } else {
+        // Handle other errors normally
+        const errorMessage = error instanceof Error ? error.message : "Failed to generate survey rules. Please try again.";
+        toast({
+          title: "Rules generation failed",
+          description: errorMessage,
+          variant: "destructive"
+        });
+      }
+    },
+  });
+}
+
+/**
+ * Generate survey questions using the planner API.
+ * 
+ * This hook calls POST /api/upsert-survey/survey-plan/{thread_id}/generate-questions
+ * to generate questions from an approved survey plan.
+ * 
+ * @returns Mutation hook for generating survey questions
+ */
+export function useGenerateQuestions() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (thread_id: string) => {
+      try {
+        return await generateQuestions(thread_id);
+      } catch (error) {
+        // Provide detailed error messages
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message = "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onSuccess: (data) => {
+      // Count total questions from rendered_pages
+      const totalQuestions = data.rendered_pages?.reduce((acc, page) => {
+        return acc + (Array.isArray(page.questions) ? page.questions.length : 0);
+      }, 0) || 0;
+      
       toast({
-        title: "Rules generation failed",
+        title: "Questions generated successfully",
+        description: `Generated ${totalQuestions} question${totalQuestions !== 1 ? 's' : ''} for your survey.`,
+        variant: "default"
+      });
+    },
+    onError: (error) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to generate survey questions. Please try again.";
+      toast({
+        title: "Question generation failed",
         description: errorMessage,
         variant: "destructive"
       });

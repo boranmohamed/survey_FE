@@ -1,4 +1,5 @@
 import { api, type GenerateSurveyRequest, type GenerateSurveyResponse } from "@shared/routes";
+import { handlePromptValidationError } from "./promptValidationError";
 
 /**
  * Anomaly backend integration (Python/FastAPI).
@@ -263,6 +264,12 @@ export async function postSurveyPlanFast(
     if (!res.ok) {
       // Only retry on 404 (wrong URL). For other errors, fail fast.
       if (res.status === 404) continue;
+      
+      // Check if this is a prompt validation error (422)
+      // This will throw a PromptValidationError with user-friendly message and suggested_prompt
+      handlePromptValidationError(res.status, text);
+      
+      // Handle other types of errors normally
       throw new Error(`Anomaly backend error (${res.status}). ${text || res.statusText}`);
     }
 

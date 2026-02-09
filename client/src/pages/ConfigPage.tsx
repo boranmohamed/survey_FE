@@ -16,6 +16,7 @@ import {
   useCreateSurveyPlan,
   useApproveSurveyPlan,
   useRejectSurveyPlan,
+  PromptValidationError,
 } from "@/hooks/use-surveys";
 import { SurveyPlanResponse } from "@shared/routes";
 import { getSurveyPlan, generateValidateFixQuestions } from "@/lib/plannerBackend";
@@ -170,7 +171,20 @@ export default function ConfigPage() {
 
         // Step 1: Create the plan and get thread_id
         console.log("🔵 Creating survey plan with planner API...");
-        const createResponse = await createSurveyPlan.mutateAsync(createRequest);
+        let createResponse;
+        try {
+          createResponse = await createSurveyPlan.mutateAsync(createRequest);
+        } catch (error) {
+          // Check if this is a prompt validation error with a suggested prompt
+          if (error instanceof PromptValidationError && error.suggestedPrompt) {
+            // Update the prompt input with the suggested prompt
+            setAiPrompt(error.suggestedPrompt);
+            // The error toast is already shown by the hook's onError handler
+            console.log("📝 Updated prompt with suggestion:", error.suggestedPrompt);
+          }
+          // Re-throw the error so it's handled by the hook's onError
+          throw error;
+        }
         const newThreadId = createResponse.thread_id;
         // Defensive check: backend contract should always return a thread_id,
         // but the shared type marks it as optional for backward compatibility.
@@ -277,7 +291,20 @@ export default function ConfigPage() {
           type: formValues.type,
         } as const;
 
-        const plan = await generateSurveyFast.mutateAsync(request);
+        let plan;
+        try {
+          plan = await generateSurveyFast.mutateAsync(request);
+        } catch (error) {
+          // Check if this is a prompt validation error with a suggested prompt
+          if (error instanceof PromptValidationError && error.suggestedPrompt) {
+            // Update the prompt input with the suggested prompt
+            setAiPrompt(error.suggestedPrompt);
+            // The error toast is already shown by the hook's onError handler
+            console.log("📝 Updated prompt with suggestion:", error.suggestedPrompt);
+          }
+          // Re-throw the error so it's handled by the hook's onError
+          throw error;
+        }
 
         console.log("📋 Received plan from backend:", plan);
         console.log("📋 Plan sections:", plan?.sections);
@@ -907,7 +934,7 @@ export default function ConfigPage() {
                               handleRephraseClick();
                             }}
                             disabled={!isPromptEnabled || !aiPrompt.trim() || rephrasePrompt.isPending}
-                            className="relative p-1.5 rounded-md hover:bg-primary/10 active:bg-primary/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-white shadow-md border border-primary/20"
+                            className="relative p-1.5 rounded-md hover:bg-primary/10 active:bg-primary/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-white shadow-md"
                             style={{ 
                               pointerEvents: 'auto',
                               zIndex: 10000,
@@ -925,13 +952,40 @@ export default function ConfigPage() {
                               id="prompt-toggle"
                             />
                           </div>
+                          {/* Generate button - positioned in corner, vertically aligned */}
+                          {/* This button calls the same handleGenerate function as the Generate button below */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              // Call the same handleGenerate function that the Generate button uses
+                              handleGenerate();
+                            }}
+                            disabled={
+                              (isPromptEnabled ? createSurveyPlan.isPending : generateSurveyFast.isPending) ||
+                              !aiPrompt.trim().length
+                            }
+                            className="relative px-4 py-2 rounded-md hover:bg-primary/10 active:bg-primary/20 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer bg-white shadow-md text-sm font-medium text-primary/60 hover:text-primary flex items-center gap-1.5"
+                            style={{ 
+                              pointerEvents: 'auto',
+                              zIndex: 10000,
+                              position: 'relative'
+                            }}
+                            aria-label="Generate"
+                            title="Generate survey"
+                          >
+                            <Wand2 className="w-4 h-4" />
+                            Generate
+                          </button>
                         </div>
                       )}
                     </div>
                   </div>
 
                   {/* Generate Button - Now positioned below the textarea */}
-                  <div className="relative z-10">
+                  {/* COMMENTED OUT: Generate button */}
+                  {/* <div className="relative z-10">
                     <Button 
                       className="w-full btn-primary py-3 text-base shadow-md shadow-primary/20 cursor-pointer relative z-10" 
                       onClick={handleGenerate}
@@ -947,7 +1001,7 @@ export default function ConfigPage() {
                         <>Generate <Wand2 className="ml-2 w-4 h-4" /></>
                       )}
                     </Button>
-                  </div>
+                  </div> */}
                 </div>
               </motion.div>
             )}
