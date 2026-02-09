@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HistorySidebar } from "@/components/HistorySidebar";
 import { QuestionCard } from "@/components/QuestionCard";
-import { useSurvey, useUpdateSurvey, useUpdateSurveyPlan } from "@/hooks/use-surveys";
+import { useSurvey, useUpdateSurvey, useUpdateSurveyPlan, useDeleteQuestion, useDeletePage } from "@/hooks/use-surveys";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -49,11 +49,15 @@ export default function BuilderPage() {
   const [editInputValue, setEditInputValue] = useState<string>("");
   // State to track if thread_id is available (for enabling/disabling edit feature)
   const [hasThreadId, setHasThreadId] = useState<boolean>(false);
+  // State to track which question is being deleted (by spec_id)
+  const [deletingSpecId, setDeletingSpecId] = useState<string | null>(null);
   
   // Fetch survey data
   const { data: survey, isLoading } = useSurvey(surveyId);
   const updateSurvey = useUpdateSurvey();
   const updateSurveyPlan = useUpdateSurveyPlan();
+  const deleteQuestion = useDeleteQuestion();
+  const deletePageMutation = useDeletePage();
 
   // Check if thread_id is available on mount and when surveyId changes
   useEffect(() => {
@@ -118,33 +122,232 @@ export default function BuilderPage() {
   const totalQuestions = sections.reduce((sum, section) => sum + section.questions.length, 0);
 
   /**
-   * Handle page deletion - removes a section from the survey structure
-   * Updates both API (if available) and localStorage for persistence
-   * Also updates local state immediately for responsive UI
+   * Handle page deletion - calls the delete page API
+   * Deletes a page from the survey plan and updates the structure
    */
   const handleDeletePage = async () => {
     if (pageToDelete === null || !surveyId || !structure) return;
 
-    // Create new sections array without the deleted page
-    const newSections = sections.filter((_, idx) => idx !== pageToDelete);
-    
-    // Create updated structure
-    const updatedStructure = {
-      ...structure,
-      sections: newSections
-    };
+    // Get thread_id from localStorage (stored when survey is generated)
+    let threadId: string | null = null;
+    if (surveyId) {
+      try {
+        const storedThreadId = localStorage.getItem(`survey_${surveyId}_thread_id`);
+        if (storedThreadId) {
+          threadId = storedThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
 
-    // Update local state immediately for responsive UI
-    setLocalStructure(updatedStructure);
-    // Update ref to prevent overwriting with stale API data
-    prevStructureRef.current = JSON.stringify(updatedStructure);
+    // If not found in survey-specific storage, try general storage
+    if (!threadId) {
+      try {
+        const generalThreadId = localStorage.getItem("current_thread_id");
+        if (generalThreadId) {
+          threadId = generalThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+
+    // If thread_id is available, use the planner API
+    if (threadId) {
+      try {
+        // Page numbers are 1-indexed in the API (pageToDelete is 0-indexed)
+        const pageNumber = pageToDelete + 1;
+        
+        // Call the delete page API
+        const result = await deletePageMutation.mutateAsync({
+          thread_id: threadId,
+          page_number: pageNumber,
+        });
+
+        // Convert rendered_pages to the structure format expected by the UI
+        const updatedStructure = {
+          sections: result.rendered_pages.map((page) => ({
+            title: page.name,
+            questions: page.questions.map((q) => ({
+              text: q.question_text,
+              type: q.question_type,
+              options: q.options || [],
+              spec_id: q.spec_id,
+              required: q.required,
+              validation: q.validation,
+              skip_logic: q.skip_logic,
+              scale: q.scale,
+            })),
+          })),
+        };
+
+        // Update local structure immediately for responsive UI
+        setLocalStructure(updatedStructure);
+        prevStructureRef.current = JSON.stringify(updatedStructure);
+
+        // Update via API if available
+        if (survey?.id) {
+          await updateSurvey.mutateAsync({
+            id: survey.id,
+            structure: updatedStructure,
+          });
+        }
+
+        // Also update localStorage as fallback
+        if (surveyId) {
+          localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(updatedStructure));
+        }
+
+        // Show success message
+        toast({
+          title: "Page deleted",
+          description: result.status?.message || `Page ${pageNumber} has been deleted successfully.`,
+        });
+
+        // Close dialog
+        setPageToDelete(null);
+      } catch (error) {
+        // Error handling is done by the hook, but we can add additional logging
+        console.error("Failed to delete page:", error);
+        // Close dialog even on error
+        setPageToDelete(null);
+      }
+    } else {
+      // Fallback to local deletion if thread_id is not available
+      // Create new sections array without the deleted page
+      const newSections = sections.filter((_, idx) => idx !== pageToDelete);
+      
+      // Create updated structure
+      const updatedStructure = {
+        ...structure,
+        sections: newSections
+      };
+
+      // Update local state immediately for responsive UI
+      setLocalStructure(updatedStructure);
+      // Update ref to prevent overwriting with stale API data
+      prevStructureRef.current = JSON.stringify(updatedStructure);
+
+      try {
+        // Update via API if available
+        if (survey?.id) {
+          await updateSurvey.mutateAsync({
+            id: survey.id,
+            structure: updatedStructure
+          });
+        }
+
+        // Also update localStorage as fallback
+        if (surveyId) {
+          localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(updatedStructure));
+        }
+
+        toast({
+          title: "Page deleted",
+          description: `Page ${pageToDelete + 1} has been removed from the survey.`,
+        });
+
+        // Close dialog
+        setPageToDelete(null);
+      } catch (error) {
+        console.error("Failed to delete page:", error);
+        // Revert local state on error
+        setLocalStructure(structure);
+        toast({
+          title: "Error",
+          description: "Failed to delete page. Please try again.",
+          variant: "destructive",
+        });
+      }
+    }
+  };
+
+  /**
+   * Handle question deletion - calls the delete question API
+   * Deletes a question from the survey plan and updates the structure
+   */
+  const handleDeleteQuestion = async (spec_id: string) => {
+    if (!spec_id) {
+      toast({
+        title: "Error",
+        description: "Question spec_id is required for deletion.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Set the deleting spec_id to show loader only on this question
+    setDeletingSpecId(spec_id);
+
+    // Get thread_id from localStorage (stored when survey is generated)
+    let threadId: string | null = null;
+    if (surveyId) {
+      try {
+        const storedThreadId = localStorage.getItem(`survey_${surveyId}_thread_id`);
+        if (storedThreadId) {
+          threadId = storedThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+
+    // If not found in survey-specific storage, try general storage
+    if (!threadId) {
+      try {
+        const generalThreadId = localStorage.getItem("current_thread_id");
+        if (generalThreadId) {
+          threadId = generalThreadId;
+        }
+      } catch (e) {
+        console.warn("Failed to read thread_id from localStorage:", e);
+      }
+    }
+
+    if (!threadId) {
+      setDeletingSpecId(null); // Clear deleting state on error
+      toast({
+        title: "Delete not available",
+        description: "This survey was generated using fast mode (without planner API). The delete feature only works for surveys generated with the planner API (toggle ON in config page).",
+        variant: "destructive",
+      });
+      return;
+    }
 
     try {
+      // Call the delete API
+      const result = await deleteQuestion.mutateAsync({
+        thread_id: threadId,
+        spec_id: spec_id,
+      });
+
+      // Convert rendered_pages to the structure format expected by the UI
+      const updatedStructure = {
+        sections: result.rendered_pages.map((page) => ({
+          title: page.name,
+          questions: page.questions.map((q) => ({
+            text: q.question_text,
+            type: q.question_type,
+            options: q.options || [],
+            spec_id: q.spec_id,
+            required: q.required,
+            validation: q.validation,
+            skip_logic: q.skip_logic,
+            scale: q.scale,
+          })),
+        })),
+      };
+
+      // Update local structure immediately for responsive UI
+      setLocalStructure(updatedStructure);
+      prevStructureRef.current = JSON.stringify(updatedStructure);
+
       // Update via API if available
       if (survey?.id) {
         await updateSurvey.mutateAsync({
           id: survey.id,
-          structure: updatedStructure
+          structure: updatedStructure,
         });
       }
 
@@ -153,22 +356,19 @@ export default function BuilderPage() {
         localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(updatedStructure));
       }
 
+      // Show success message
       toast({
-        title: "Page deleted",
-        description: `Page ${pageToDelete + 1} has been removed from the survey.`,
+        title: "Question deleted",
+        description: result.status?.message || "Question has been deleted successfully.",
       });
 
-      // Close dialog
-      setPageToDelete(null);
+      // Clear deleting state after successful deletion
+      setDeletingSpecId(null);
     } catch (error) {
-      console.error("Failed to delete page:", error);
-      // Revert local state on error
-      setLocalStructure(structure);
-      toast({
-        title: "Error",
-        description: "Failed to delete page. Please try again.",
-        variant: "destructive",
-      });
+      // Error handling is done by the hook, but we can add additional logging
+      console.error("Failed to delete question:", error);
+      // Clear deleting state on error
+      setDeletingSpecId(null);
     }
   };
 
@@ -395,6 +595,9 @@ export default function BuilderPage() {
                             validation={question.validation}
                             skip_logic={question.skip_logic}
                             scale={question.scale}
+                            // Pass delete handler if thread_id is available
+                            onDelete={question.spec_id && hasThreadId ? () => handleDeleteQuestion(question.spec_id) : undefined}
+                            isDeleting={deleteQuestion.isPending && deletingSpecId === question.spec_id}
                           />
                         );
                       })}
@@ -484,12 +687,20 @@ export default function BuilderPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deletePageMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeletePage}
+              disabled={deletePageMutation.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete
+              {deletePageMutation.isPending ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -788,3 +788,257 @@ export async function updateSurveyPlan(
   return normalizedResponse;
 }
 
+/**
+ * Delete a question from a survey plan by calling the DELETE endpoint.
+ * After deletion, remaining questions are automatically renumbered.
+ * 
+ * @param thread_id - The unique thread identifier for the survey plan
+ * @param spec_id - The spec_id of the question to delete (format: p{page}_q{question})
+ * @returns Response containing updated rendered pages with remaining questions
+ */
+export async function deleteQuestion(
+  thread_id: string,
+  spec_id: string,
+): Promise<{
+  meta?: any;
+  status: { code: string; message: string };
+  thread_id: string;
+  rendered_pages: RenderedPage[];
+}> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/upsert-survey/survey-plan/${thread_id}/question/${spec_id}`;
+  
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  const doDelete = async (url: string) => {
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doDelete(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+      
+      // Try to parse error response
+      let errorMessage = `Planner API error (${res.status}). ${text || res.statusText}`;
+      try {
+        const errorData = text ? JSON.parse(text) : null;
+        if (errorData?.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData?.status?.message) {
+          errorMessage = errorData.status.message;
+        }
+      } catch {
+        // Use default error message
+      }
+      throw new Error(errorMessage);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Planner API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full planner API delete question response:", JSON.stringify(finalJson, null, 2));
+
+  // Extract data from various possible response structures
+  if (!finalJson || typeof finalJson !== 'object') {
+    throw new Error("Planner API returned invalid response");
+  }
+
+  const response = finalJson as any;
+  
+  // Extract data from either data object or root level
+  const data = response.data || response;
+  
+  // Extract thread_id
+  const threadId = data.thread_id || response.thread_id || thread_id;
+  if (!threadId) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  // Extract rendered_pages
+  const renderedPages = data.rendered_pages || response.rendered_pages;
+  if (!renderedPages || !Array.isArray(renderedPages)) {
+    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rendered_pages");
+  }
+
+  // Return normalized response
+  const normalizedResponse = {
+    meta: response.meta,
+    status: response.status || { code: "success", message: "Question deleted successfully" },
+    thread_id: threadId,
+    rendered_pages: renderedPages,
+  };
+
+  console.log("✅ Normalized delete question response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+
+/**
+ * Delete a page from a survey plan by calling the DELETE endpoint.
+ * After deletion, remaining pages are automatically renumbered.
+ * 
+ * @param thread_id - The unique thread identifier for the survey plan
+ * @param page_number - The page number to delete (1-indexed, e.g., 1 for first page, 2 for second page)
+ * @returns Response containing updated rendered pages with remaining pages
+ */
+export async function deletePage(
+  thread_id: string,
+  page_number: number,
+): Promise<{
+  meta?: any;
+  status: { code: string; message: string };
+  thread_id: string;
+  rendered_pages: RenderedPage[];
+}> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/upsert-survey/survey-plan/${thread_id}/page/${page_number}`;
+  
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  const doDelete = async (url: string) => {
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doDelete(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+      
+      // Try to parse error response
+      let errorMessage = `Planner API error (${res.status}). ${text || res.statusText}`;
+      try {
+        const errorData = text ? JSON.parse(text) : null;
+        if (errorData?.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData?.status?.message) {
+          errorMessage = errorData.status.message;
+        }
+      } catch {
+        // Use default error message
+      }
+      throw new Error(errorMessage);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Planner API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full planner API delete page response:", JSON.stringify(finalJson, null, 2));
+
+  // Extract data from various possible response structures
+  if (!finalJson || typeof finalJson !== 'object') {
+    throw new Error("Planner API returned invalid response");
+  }
+
+  const response = finalJson as any;
+  
+  // Extract data from either data object or root level
+  const data = response.data || response;
+  
+  // Extract thread_id
+  const threadId = data.thread_id || response.thread_id || thread_id;
+  if (!threadId) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  // Extract rendered_pages
+  const renderedPages = data.rendered_pages || response.rendered_pages;
+  if (!renderedPages || !Array.isArray(renderedPages)) {
+    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rendered_pages");
+  }
+
+  // Return normalized response
+  const normalizedResponse = {
+    meta: response.meta,
+    status: response.status || { code: "success", message: "Page deleted successfully" },
+    thread_id: threadId,
+    rendered_pages: renderedPages,
+  };
+
+  console.log("✅ Normalized delete page response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+

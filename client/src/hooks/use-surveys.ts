@@ -10,7 +10,7 @@ import {
 } from "@shared/routes";
 import { useToast } from "@/hooks/use-toast";
 import { postSurveyPlanFast } from "@/lib/anomalyBackend";
-import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan } from "@/lib/plannerBackend";
+import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan, deleteQuestion, deletePage } from "@/lib/plannerBackend";
 import { toPlannerLanguageCode } from "@/lib/language";
 
 // ============================================
@@ -741,6 +741,84 @@ export function useUpdateSurveyPlan() {
       const errorMessage = error instanceof Error ? error.message : "Failed to update survey plan. Please try again.";
       toast({
         title: "Update failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    },
+  });
+}
+
+/**
+ * Delete a question from a survey plan using the planner API.
+ * 
+ * This hook calls DELETE /api/upsert-survey/survey-plan/{thread_id}/question/{spec_id} to delete
+ * a question from the survey plan. After deletion, remaining questions are automatically renumbered.
+ * 
+ * @returns Mutation hook for deleting questions
+ */
+export function useDeleteQuestion() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ thread_id, spec_id }: { thread_id: string; spec_id: string }) => {
+      try {
+        return await deleteQuestion(thread_id, spec_id);
+      } catch (error) {
+        // Provide detailed error messages
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message = "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onError: (error) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete question. Please try again.";
+      toast({
+        title: "Delete failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+    },
+  });
+}
+
+/**
+ * Delete a page from a survey plan using the planner API.
+ * 
+ * This hook calls DELETE /api/upsert-survey/survey-plan/{thread_id}/page/{page_number} to delete
+ * a page from the survey plan. After deletion, remaining pages are automatically renumbered.
+ * 
+ * @returns Mutation hook for deleting pages
+ */
+export function useDeletePage() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ thread_id, page_number }: { thread_id: string; page_number: number }) => {
+      try {
+        return await deletePage(thread_id, page_number);
+      } catch (error) {
+        // Provide detailed error messages
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message = "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onError: (error) => {
+      const errorMessage = error instanceof Error ? error.message : "Failed to delete page. Please try again.";
+      toast({
+        title: "Delete failed",
         description: errorMessage,
         variant: "destructive"
       });
