@@ -18,7 +18,7 @@ import { api, type GenerateSurveyRequest, type GenerateSurveyResponse } from "@s
 
 // Default backend URL - can be overridden with VITE_ANOMALY_API_BASE_URL environment variable
 // If your backend uses the /anomaly prefix, keep it. Otherwise, remove /anomaly
-const DEFAULT_ANOMALY_API_BASE_URL = "http://192.168.2.70:8000";
+const DEFAULT_ANOMALY_API_BASE_URL = "http://127.0.0.1:8000";
 const SURVEY_PLAN_FAST_PATH = "/api/upsert-survey/survey-plan/fast";
 
 function joinUrl(base: string, path: string) {

@@ -1,6 +1,5 @@
 import { 
   api, 
-  buildUrl,
   type CreateSurveyPlanRequest, 
   type CreateSurveyPlanResponse,
   type SurveyPlanResponse,
@@ -23,7 +22,7 @@ import {
  */
 
 // Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
-const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.70:8000";
+const DEFAULT_PLANNER_API_BASE_URL = "http://127.0.0.1:8000";
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -161,7 +160,8 @@ export async function getSurveyPlan(
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
-  const path = buildUrl(api.planner.get.path, { thread_id });
+  // Replace :thread_id parameter in the path (buildUrl would return full URL, but we need just the path)
+  const path = api.planner.get.path.replace(':thread_id', thread_id);
   
   const candidateUrls = Array.from(
     new Set([

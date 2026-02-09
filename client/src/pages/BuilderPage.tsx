@@ -173,10 +173,10 @@ export default function BuilderPage() {
   };
 
   /**
-   * Handle arrow click - calls the update survey plan API
+   * Handle submit edit - calls the update survey plan API
    * Updates the survey plan based on natural language instructions
    */
-  const handleArrowClick = async () => {
+  const handleSubmitEdit = async () => {
     if (!editInputValue.trim()) {
       toast({
         title: "Empty input",
@@ -411,32 +411,34 @@ export default function BuilderPage() {
             <div className="flex items-center gap-2">
               <Input 
                 type="text" 
-                placeholder={hasThreadId ? "Enter your text here..." : "Edit feature requires planner API (generate with toggle ON)"}
+                placeholder={hasThreadId ? "Enter your update instructions here..." : "Edit feature requires planner API (generate with toggle ON)"}
                 className="flex-1"
                 value={editInputValue}
                 onChange={(e) => setEditInputValue(e.target.value)}
                 disabled={!hasThreadId}
                 onKeyDown={(e) => {
                   // Allow submitting with Enter key (only if thread_id is available)
-                  if (e.key === "Enter" && hasThreadId) {
-                    handleArrowClick();
+                  if (e.key === "Enter" && hasThreadId && !updateSurveyPlan.isPending) {
+                    handleSubmitEdit();
                   }
                 }}
               />
-              {/* Clickable arrow button */}
-              <button
-                onClick={handleArrowClick}
-                disabled={updateSurveyPlan.isPending || !hasThreadId}
-                className="flex items-center justify-center h-9 w-9 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              {/* Submit Edit button */}
+              <Button
+                onClick={handleSubmitEdit}
+                disabled={updateSurveyPlan.isPending || !hasThreadId || !editInputValue.trim()}
+                className="min-w-[120px]"
                 aria-label="Submit edit"
-                title={!hasThreadId ? "Edit feature requires planner API. Generate survey with toggle ON in config page." : "Submit edit"}
               >
                 {updateSurveyPlan.isPending ? (
-                  <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  <>
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
+                    Updating...
+                  </>
                 ) : (
-                  <ArrowRight className="w-4 h-4" />
+                  "Submit Edit"
                 )}
-              </button>
+              </Button>
             </div>
             {!hasThreadId && (
               <p className="text-xs text-muted-foreground">
