@@ -51,16 +51,48 @@ const metadataSchema = z.object({
   nameArabic: z.string().optional(),
 }).refine((data) => {
   // If bilingual, both names are required
+  // Note: 'name' field contains English name when bilingual, 'nameArabic' contains Arabic name
   if (data.language === "Bilingual") {
-    return data.nameEnglish && data.nameEnglish.length >= 3 && data.nameArabic && data.nameArabic.length >= 3;
+    return data.name && data.name.length >= 3 && data.nameArabic && data.nameArabic.length >= 3;
   }
   return true;
 }, {
   message: "Both English and Arabic names are required for bilingual surveys",
-  path: ["nameEnglish"],
+  path: ["name"],
 });
 
 type Step = "metadata" | "ai-config" | "blueprint";
+
+/**
+ * Combines English and Arabic titles for bilingual surveys.
+ * Format: "English/Arabic" (no spaces around slash).
+ * Handles empty strings gracefully - returns only the non-empty title if one is missing.
+ * 
+ * @param english - English title (from 'name' field when bilingual)
+ * @param arabic - Arabic title (from 'nameArabic' field when bilingual)
+ * @returns Combined title in format "English/Arabic", or single title if one is empty
+ */
+function combineBilingualTitle(english: string, arabic: string): string {
+  const englishTrimmed = english?.trim() || "";
+  const arabicTrimmed = arabic?.trim() || "";
+  
+  // If both are provided, combine with slash
+  if (englishTrimmed && arabicTrimmed) {
+    return `${englishTrimmed}/${arabicTrimmed}`;
+  }
+  
+  // If only one is provided, return that one
+  if (englishTrimmed) {
+    return englishTrimmed;
+  }
+  
+  if (arabicTrimmed) {
+    return arabicTrimmed;
+  }
+  
+  // If both are empty, return empty string (validation should catch this)
+  return "";
+}
 
 export default function ConfigPage() {
   const [, setLocation] = useLocation();
@@ -111,10 +143,27 @@ export default function ConfigPage() {
 
   const handleMetadataSubmit = async (values: z.infer<typeof metadataSchema>) => {
     try {
-      if (surveyId) {
-        await updateSurvey.mutateAsync({ id: surveyId, ...values });
+      // Prepare payload for backend
+      // If bilingual, combine English and Arabic names into single 'name' field
+      // Database schema only has a single 'name' field, so we combine them here
+      const payload: any = { ...values };
+      
+      if (values.language === "Bilingual") {
+        // Combine English (from 'name' field) and Arabic (from 'nameArabic' field) titles
+        payload.name = combineBilingualTitle(values.name, values.nameArabic || "");
+        // Remove nameArabic from payload as database doesn't have this field
+        delete payload.nameArabic;
+        delete payload.nameEnglish; // Also remove nameEnglish if present
       } else {
-        const newSurvey = await createSurvey.mutateAsync(values);
+        // For non-bilingual surveys, ensure nameArabic is not sent
+        delete payload.nameArabic;
+        delete payload.nameEnglish;
+      }
+      
+      if (surveyId) {
+        await updateSurvey.mutateAsync({ id: surveyId, ...payload });
+      } else {
+        const newSurvey = await createSurvey.mutateAsync(payload);
         setSurveyId(newSurvey.id);
       }
     } catch (error) {
@@ -136,8 +185,13 @@ export default function ConfigPage() {
     if (!currentSurveyId) {
       try {
         const formValues = form.getValues();
+        // Combine titles if bilingual before creating survey
+        let surveyName = formValues.name || "Untitled Survey";
+        if (formValues.language === "Bilingual") {
+          surveyName = combineBilingualTitle(formValues.name, formValues.nameArabic || "");
+        }
         const newSurvey = await createSurvey.mutateAsync({
-          name: formValues.name || "Untitled Survey",
+          name: surveyName,
           language: formValues.language,
           collectionMode: formValues.collectionMode
         });
@@ -160,9 +214,14 @@ export default function ConfigPage() {
         // The UI stores labels like "English" | "Arabic" | "Bilingual".
         // We normalize here to keep the backend contract clean and predictable.
         const plannerLanguage = toPlannerLanguageCode(formValues.language);
+        // Combine titles if bilingual before sending to planner backend
+        let surveyTitle = formValues.name;
+        if (formValues.language === "Bilingual") {
+          surveyTitle = combineBilingualTitle(formValues.name, formValues.nameArabic || "");
+        }
         const createRequest = {
           prompt: aiPrompt,
-          title: formValues.name,
+          title: surveyTitle,
           type: formValues.type,
           language: plannerLanguage,
           numQuestions,
@@ -281,13 +340,18 @@ export default function ConfigPage() {
         }
       } else {
         // Toggle OFF: Use existing external backend (Anomaly)
+        // Combine titles if bilingual before sending to external backend
+        let surveyTitle = formValues.name;
+        if (formValues.language === "Bilingual") {
+          surveyTitle = combineBilingualTitle(formValues.name, formValues.nameArabic || "");
+        }
         const request = {
           prompt: aiPrompt,
           numQuestions,
           numPages,
           language: formValues.language,
           // Include title and type for external backend (required fields)
-          title: formValues.name,
+          title: surveyTitle,
           type: formValues.type,
         } as const;
 
@@ -464,7 +528,7 @@ export default function ConfigPage() {
                 };
               });
               
-              return { sections, suggestedName: approvedPlan.plan.title };
+              return { sections, suggestedName: approvedPlan.plan?.title || '' };
             }
             
             // Fallback: try treating generated_questions as a record (old format)
@@ -490,7 +554,7 @@ export default function ConfigPage() {
                 };
               });
               
-              return { sections, suggestedName: approvedPlan.plan.title };
+              return { sections, suggestedName: approvedPlan.plan?.title || '' };
             }
             
             return null;
@@ -518,7 +582,7 @@ export default function ConfigPage() {
                 skip_logic: question.skip_logic || undefined,
               })),
             })),
-            suggestedName: approvedPlan.plan.title,
+            suggestedName: approvedPlan.plan?.title || '',
           };
         } else if (approvedPlan.generated_questions) {
           // Use generated_questions from approved plan (actual questions generated during approval)
@@ -530,7 +594,7 @@ export default function ConfigPage() {
             // Fallback to original plan structure
             // Handle both section_brief and question_specs formats
             transformedPlan = {
-              sections: approvedPlan.plan.pages.map((page, idx) => {
+              sections: (approvedPlan.plan?.pages || []).map((page, idx) => {
                 if (page.section_brief) {
                   // For section_brief format, create placeholder structure
                   const questionCount = page.section_brief.question_count || 0;
@@ -558,14 +622,14 @@ export default function ConfigPage() {
                   };
                 }
               }),
-              suggestedName: approvedPlan.plan.title,
+              suggestedName: approvedPlan.plan?.title || '',
             };
           }
         } else {
           // Fallback to original plan structure (only has intent and options_hint)
           // Handle both section_brief and question_specs formats
           transformedPlan = {
-            sections: approvedPlan.plan.pages.map((page, idx) => {
+            sections: (approvedPlan.plan?.pages || []).map((page, idx) => {
               if (page.section_brief) {
                 // For section_brief format, create placeholder structure
                 const questionCount = page.section_brief.question_count || 0;
@@ -593,7 +657,7 @@ export default function ConfigPage() {
                 };
               }
             }),
-            suggestedName: approvedPlan.plan.title,
+            suggestedName: approvedPlan.plan?.title || '',
           };
         }
 
@@ -778,12 +842,35 @@ export default function ConfigPage() {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              <SelectItem value="customer_feedback">Customer Feedback</SelectItem>
-                              <SelectItem value="employee_satisfaction">Employee Satisfaction</SelectItem>
-                              <SelectItem value="market_research">Market Research</SelectItem>
-                              <SelectItem value="product_feedback">Product Feedback</SelectItem>
-                              <SelectItem value="event_feedback">Event Feedback</SelectItem>
-                              <SelectItem value="general">General Survey</SelectItem>
+                              <SelectItem value="general">General</SelectItem>
+                              <SelectItem value="population">Population</SelectItem>
+                              <SelectItem value="labor">Labor</SelectItem>
+                              <SelectItem value="education">Education</SelectItem>
+                              <SelectItem value="health">Health</SelectItem>
+                              <SelectItem value="income_and_consumption">Income and Consumption</SelectItem>
+                              <SelectItem value="social">Social</SelectItem>
+                              <SelectItem value="justice_and_crime">Justice and Crime</SelectItem>
+                              <SelectItem value="culture">Culture</SelectItem>
+                              <SelectItem value="political_and_other_community_activities">Political and Other Community Activities</SelectItem>
+                              <SelectItem value="economic">Economic</SelectItem>
+                              <SelectItem value="business">Business</SelectItem>
+                              <SelectItem value="agriculture">Agriculture</SelectItem>
+                              <SelectItem value="energy">Energy</SelectItem>
+                              <SelectItem value="transport">Transport</SelectItem>
+                              <SelectItem value="tourism">Tourism</SelectItem>
+                              <SelectItem value="financial_and_banking">Financial and Banking</SelectItem>
+                              <SelectItem value="government">Government</SelectItem>
+                              <SelectItem value="prices">Prices</SelectItem>
+                              <SelectItem value="technology_and_science">Technology and Science</SelectItem>
+                              <SelectItem value="environment">Environment</SelectItem>
+                              <SelectItem value="regional">Regional</SelectItem>
+                              <SelectItem value="multi_domain">Multi Domain</SelectItem>
+                              <SelectItem value="happiness">Happiness</SelectItem>
+                              <SelectItem value="online_research">Online Research</SelectItem>
+                              <SelectItem value="human_resources">Human Resources</SelectItem>
+                              <SelectItem value="events">Events</SelectItem>
+                              <SelectItem value="community">Community</SelectItem>
+                              <SelectItem value="demographics">Demographics</SelectItem>
                             </SelectContent>
                           </Select>
                           <FormMessage />
