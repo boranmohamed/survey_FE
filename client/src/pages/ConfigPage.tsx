@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
-import { Globe, Smartphone, Link as LinkIcon, Sparkles, Wand2, Lightbulb, ArrowRight, Save, Layout, RefreshCw } from "lucide-react";
+import { Globe, Smartphone, Link as LinkIcon, Sparkles, Wand2, Lightbulb, ArrowRight, Save, Layout, RefreshCw, Paperclip, X } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -117,6 +117,10 @@ export default function ConfigPage() {
    */
   const [isPromptEnabled, setIsPromptEnabled] = useState(true);
 
+  // File upload state - stores the uploaded file and its text content
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [fileContent, setFileContent] = useState<string>("");
+
   // Hooks
   const createSurvey = useCreateSurvey();
   const updateSurvey = useUpdateSurvey();
@@ -141,6 +145,47 @@ export default function ConfigPage() {
   // Watch language field to conditionally show bilingual inputs
   const selectedLanguage = form.watch("language");
 
+  /**
+   * Handle file selection - reads the file as text and stores it
+   * The file content will be sent to the backend API as text
+   */
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setAttachedFile(null);
+      setFileContent("");
+      return;
+    }
+
+    // Store the file
+    setAttachedFile(file);
+
+    // Read file content as text
+    try {
+      const text = await file.text();
+      setFileContent(text);
+      console.log("File uploaded successfully:", file.name, "Size:", file.size, "bytes");
+    } catch (error) {
+      console.error("Error reading file:", error);
+      setAttachedFile(null);
+      setFileContent("");
+      // You could show a toast error here if needed
+    }
+  };
+
+  /**
+   * Remove the attached file
+   */
+  const handleRemoveFile = () => {
+    setAttachedFile(null);
+    setFileContent("");
+    // Reset the file input
+    const fileInput = document.getElementById("file-upload") as HTMLInputElement;
+    if (fileInput) {
+      fileInput.value = "";
+    }
+  };
+
   const handleMetadataSubmit = async (values: z.infer<typeof metadataSchema>) => {
     try {
       // Prepare payload for backend
@@ -158,6 +203,13 @@ export default function ConfigPage() {
         // For non-bilingual surveys, ensure nameArabic is not sent
         delete payload.nameArabic;
         delete payload.nameEnglish;
+      }
+      
+      // Include attached file content as text if a file was uploaded
+      // The backend will receive this as a text field in the payload
+      if (fileContent) {
+        payload.attachedFileContent = fileContent;
+        payload.attachedFileName = attachedFile?.name || "";
       }
       
       if (surveyId) {
@@ -219,7 +271,8 @@ export default function ConfigPage() {
         if (formValues.language === "Bilingual") {
           surveyTitle = combineBilingualTitle(formValues.name, formValues.nameArabic || "");
         }
-        const createRequest = {
+        // Build the request object with optional file attachment fields
+        const createRequest: any = {
           prompt: aiPrompt,
           title: surveyTitle,
           type: formValues.type,
@@ -227,6 +280,14 @@ export default function ConfigPage() {
           numQuestions,
           numPages,
         };
+        
+        // Include file content and name if a file was uploaded
+        // The backend expects these fields as text (not multipart/form-data)
+        if (fileContent && attachedFile) {
+          createRequest.attachedFileContent = fileContent;
+          createRequest.attachedFileName = attachedFile.name;
+          console.log("📎 Including file attachment in plan request:", attachedFile.name, `(${(attachedFile.size / 1024).toFixed(2)} KB)`);
+        }
 
         // Step 1: Create the plan and get thread_id
         console.log("🔵 Creating survey plan with planner API...");
@@ -904,6 +965,54 @@ export default function ConfigPage() {
                       )}
                     />
 
+                    {/* Attach File - File upload field */}
+                    <FormItem>
+                      <FormLabel className="text-lg font-semibold text-secondary flex items-center gap-2">
+                        <Paperclip className="w-5 h-5 text-primary" /> Attach File
+                      </FormLabel>
+                      <div className="space-y-3">
+                        {/* File input */}
+                        <div className="flex items-center gap-3">
+                          <label
+                            htmlFor="file-upload"
+                            className="flex items-center gap-2 px-4 py-2 border border-border rounded-md bg-white hover:bg-primary/5 hover:border-primary/50 cursor-pointer transition-colors text-sm font-medium"
+                          >
+                            <Paperclip className="w-4 h-4" />
+                            Choose File
+                          </label>
+                          <Input
+                            id="file-upload"
+                            type="file"
+                            onChange={handleFileChange}
+                            className="hidden"
+                            accept="*/*"
+                          />
+                          {attachedFile && (
+                            <div className="flex items-center gap-2 flex-1">
+                              <span className="text-sm text-muted-foreground flex items-center gap-2">
+                                <Paperclip className="w-4 h-4" />
+                                {attachedFile.name}
+                                <span className="text-xs text-muted-foreground">
+                                  ({(attachedFile.size / 1024).toFixed(2)} KB)
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleRemoveFile}
+                                className="p-1 hover:bg-destructive/10 rounded-md transition-colors"
+                                aria-label="Remove file"
+                              >
+                                <X className="w-4 h-4 text-destructive" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {/* Helper text */}
+                        <p className="text-sm text-muted-foreground">
+                          Upload a file to include its content with your survey. The file will be read as text and sent to the backend.
+                        </p>
+                      </div>
+                    </FormItem>
 
                     {/* Collection Mode */}
                     <FormField
@@ -1103,6 +1212,7 @@ export default function ConfigPage() {
                 threadId={threadId || undefined}
                 isRejecting={rejectSurveyPlan.isPending}
                 isApproving={approveSurveyPlan.isPending}
+                attachedFile={attachedFile}
               />
             )}
 
