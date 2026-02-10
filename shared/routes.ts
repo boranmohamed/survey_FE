@@ -138,6 +138,9 @@ export const createSurveyPlanRequestSchema = z.object({
   language: z.string(),
   numQuestions: z.number().min(1).max(20).optional(),
   numPages: z.number().min(1).max(5).optional(),
+  // Optional file attachment fields - sent as text content and file name
+  attachedFileContent: z.string().optional(),
+  attachedFileName: z.string().optional(),
 });
 
 // Response schema for creating a survey plan (returns thread_id)

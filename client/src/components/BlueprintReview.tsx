@@ -30,6 +30,7 @@ interface BlueprintReviewProps {
   threadId?: string;
   isRejecting?: boolean;
   isApproving?: boolean;
+  attachedFile?: File | null; // File that was uploaded by the user
 }
 
 /**
@@ -39,7 +40,7 @@ function isPlannerResponse(plan: GenerateSurveyResponse | SurveyPlanResponse): p
   return 'plan' in plan && 'approval_status' in plan && 'thread_id' in plan;
 }
 
-export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, isRejecting = false, isApproving = false }: BlueprintReviewProps) {
+export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, isRejecting = false, isApproving = false, attachedFile = null }: BlueprintReviewProps) {
   // State for reject feedback dialog
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectFeedback, setRejectFeedback] = useState("");
@@ -154,6 +155,19 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <p className="text-base font-semibold">{planData.language}</p>
                     </div>
                   </div>
+                  {/* Display uploaded file information if a file was attached */}
+                  {attachedFile && (
+                    <div className="mt-4 p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                      <p className="text-sm font-medium text-muted-foreground mb-2">Attached File</p>
+                      <div className="flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-primary" />
+                        <p className="text-base font-semibold text-primary">{attachedFile.name}</p>
+                        <span className="text-xs text-muted-foreground">
+                          ({(attachedFile.size / 1024).toFixed(2)} KB)
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   {planData.estimated_question_count && (
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Estimated Questions</p>
