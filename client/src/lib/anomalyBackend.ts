@@ -19,8 +19,30 @@ import { handlePromptValidationError } from "./promptValidationError";
 
 // Default backend URL - can be overridden with VITE_ANOMALY_API_BASE_URL environment variable
 // If your backend uses the /anomaly prefix, keep it. Otherwise, remove /anomaly
-const DEFAULT_ANOMALY_API_BASE_URL = "http://192.168.2.70:8000";
+// Default to localhost for the common case (backend running on the same machine).
+// We intentionally do NOT hardcode a specific LAN IP here because it changes per network/device.
+const DEFAULT_ANOMALY_API_BASE_URL = "http://127.0.0.1:8000";
 const SURVEY_PLAN_FAST_PATH = "/api/upsert-survey/survey-plan/fast";
+
+/**
+ * See `plannerBackend.ts` for detailed reasoning.
+ * This keeps "localhost" usable when the UI is opened from another device on the LAN.
+ */
+function replaceLocalhostWithCurrentHostname(url: string): string {
+  const isLocalHost = url.includes("localhost") || url.includes("127.0.0.1");
+  if (!isLocalHost) return url;
+
+  if (typeof window === "undefined") return url;
+  const currentHost = window.location.hostname;
+  if (!currentHost) return url;
+  if (currentHost === "localhost" || currentHost === "127.0.0.1") return url;
+
+  const portMatch = url.match(/:(\d+)/);
+  const port = portMatch ? portMatch[1] : "8000";
+  const newUrl = url.replace(/https?:\/\/[^\/]+/, `http://${currentHost}:${port}`);
+  console.warn("⚠️ Replaced localhost with current host for LAN access:", url, "→", newUrl);
+  return newUrl;
+}
 
 function joinUrl(base: string, path: string) {
   // Simple and robust URL joiner.
@@ -220,8 +242,9 @@ function extractPlanCandidate(raw: unknown): unknown {
 export async function postSurveyPlanFast(
   data: GenerateSurveyRequest,
 ): Promise<GenerateSurveyResponse> {
-  const baseUrl =
+  const rawBaseUrl =
     (import.meta as any).env?.VITE_ANOMALY_API_BASE_URL ?? DEFAULT_ANOMALY_API_BASE_URL;
+  const baseUrl = replaceLocalhostWithCurrentHostname(rawBaseUrl);
 
   /**
    * NOTE ABOUT 404s

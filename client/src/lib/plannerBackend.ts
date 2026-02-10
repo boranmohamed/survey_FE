@@ -21,11 +21,60 @@ import { handlePromptValidationError } from "./promptValidationError";
  * - Example values:
  *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000`
  *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000/anomaly`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.70:8000` (if the backend runs on another machine)
  */
 
 // Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
-// Updated to use localhost for local development (backend runs on port 8000)
-const DEFAULT_PLANNER_API_BASE_URL = "http://localhost:8000";
+// Default to localhost for the common case (planner backend running on the same machine).
+// We intentionally do NOT hardcode a specific LAN IP here because it changes per network/device.
+const DEFAULT_PLANNER_API_BASE_URL = "http://127.0.0.1:8000";
+
+/**
+ * Helper function to keep "localhost" usable when the UI is opened from another device.
+ *
+ * Problem:
+ * - If a phone opens the UI at `http://192.168.x.y:5000`, and the planner base URL is
+ *   `http://127.0.0.1:8000`, the phone will try to call *its own* localhost (wrong).
+ *
+ * Solution:
+ * - If the configured base URL points to localhost, rewrite the host to the current page host.
+ * - This means:
+ *   - UI opened via `localhost:5000`  -> planner stays `localhost/127.0.0.1:8000`
+ *   - UI opened via `192.168.x.y:5000` -> planner becomes `192.168.x.y:8000`
+ *
+ * If you want to call a different machine, set `VITE_PLANNER_API_BASE_URL` explicitly.
+ */
+function ensureNetworkIP(url: string): string {
+  const isLocalHost =
+    url.includes("localhost") || url.includes("127.0.0.1");
+
+  if (!isLocalHost) return url;
+
+  // In SSR / build steps there is no window. In that case, keep as-is.
+  if (typeof window === "undefined") return url;
+
+  const currentHost = window.location.hostname;
+  if (!currentHost) return url;
+
+  // If we're already on localhost, no need to rewrite.
+  if (currentHost === "localhost" || currentHost === "127.0.0.1") return url;
+
+  // Keep the existing port if present, default to 8000 otherwise.
+  const portMatch = url.match(/:(\d+)/);
+  const port = portMatch ? portMatch[1] : "8000";
+  const newUrl = url.replace(/https?:\/\/[^\/]+/, `http://${currentHost}:${port}`);
+  console.warn("⚠️ Replaced localhost with current host for LAN access:", url, "→", newUrl);
+  return newUrl;
+}
+
+/**
+ * Get the planner API base URL, ensuring it never uses localhost.
+ */
+function getPlannerBaseUrl(): string {
+  const envUrl = import.meta.env.VITE_PLANNER_API_BASE_URL;
+  const baseUrl = envUrl ?? DEFAULT_PLANNER_API_BASE_URL;
+  return ensureNetworkIP(baseUrl);
+}
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -44,7 +93,8 @@ function toggleAnomalyPrefix(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   const anomalySuffix = "/anomaly";
   if (trimmed.toLowerCase().endsWith(anomalySuffix)) {
-    return trimmed.slice(0, -anomalySuffix.length) || "http://127.0.0.1:8000";
+    // Fallback to default base URL if the trimmed base becomes empty.
+    return trimmed.slice(0, -anomalySuffix.length) || DEFAULT_PLANNER_API_BASE_URL;
   }
   return `${trimmed}${anomalySuffix}`;
 }
@@ -60,9 +110,8 @@ export async function createSurveyPlan(
   data: CreateSurveyPlanRequest,
 ): Promise<CreateSurveyPlanResponse> {
   // Get base URL from environment variable or use default
-  // Vite exposes env vars via import.meta.env (must be prefixed with VITE_)
-  const baseUrl =
-    import.meta.env.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Automatically ensures network IP is used (never localhost)
+  const baseUrl = getPlannerBaseUrl();
 
   // Debug: Log the base URL being used
   console.log("🔍 Planner API Base URL:", baseUrl);
@@ -202,8 +251,8 @@ export async function createSurveyPlan(
 export async function getSurveyPlan(
   thread_id: string,
 ): Promise<SurveyPlanResponse> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -324,8 +373,8 @@ export async function getSurveyPlan(
 export async function approveSurveyPlan(
   thread_id: string,
 ): Promise<SurveyPlanResponse> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -450,8 +499,8 @@ export async function rejectSurveyPlan(
   thread_id: string,
   feedback: string,
 ): Promise<SurveyPlanResponse> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -594,8 +643,8 @@ export async function generateValidateFixQuestions(
   thread_id: string,
   auto_fix: boolean = true,
 ): Promise<GenerateValidateFixResponse> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -717,8 +766,8 @@ export async function updateSurveyPlan(
   validation?: any;
   saved?: boolean;
 }> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -844,8 +893,8 @@ export async function updateSurveyPlan(
 export async function generateQuestions(
   thread_id: string,
 ): Promise<GenerateValidateFixResponse> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -1023,8 +1072,8 @@ export async function generateSurveyRules(
     final_rules_count: number;
   };
 }> {
-  const baseUrl =
-    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+  // Get base URL, ensuring it never uses localhost
+  const baseUrl = getPlannerBaseUrl();
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
