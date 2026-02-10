@@ -309,6 +309,23 @@ export const api = {
 };
 
 // ============================================
+// API BASE URL CONFIGURATION
+// ============================================
+/**
+ * Get the API base URL from environment variable or use default
+ * Can be set via VITE_API_BASE_URL environment variable
+ * Defaults to http://127.0.0.1:8000
+ */
+export function getApiBaseUrl(): string {
+  // Check for Vite environment variable
+  if (import.meta.env?.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  // Fallback to default backend URL
+  return 'http://127.0.0.1:8000';
+}
+
+// ============================================
 // HELPER FUNCTIONS
 // ============================================
 export function buildUrl(path: string, params?: Record<string, string | number>): string {
@@ -319,6 +336,13 @@ export function buildUrl(path: string, params?: Record<string, string | number>)
         url = url.replace(`:${key}`, String(value));
       }
     });
+  }
+  // Prepend API base URL if path starts with /api
+  if (url.startsWith('/api')) {
+    const baseUrl = getApiBaseUrl();
+    // Remove trailing slash from baseUrl if present
+    const cleanBaseUrl = baseUrl.replace(/\/$/, '');
+    return `${cleanBaseUrl}${url}`;
   }
   return url;
 }

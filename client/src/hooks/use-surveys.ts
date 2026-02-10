@@ -2,15 +2,27 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   api,
   buildUrl,
-  type CreateSurveyRequest,
-  type UpdateSurveyRequest,
-  type GenerateSurveyRequest,
   type CreateSurveyPlanRequest,
   type SurveyPlanResponse,
 } from "@shared/routes";
+import {
+  type CreateSurveyRequest,
+  type UpdateSurveyRequest,
+  type GenerateSurveyRequest,
+} from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { postSurveyPlanFast } from "@/lib/anomalyBackend";
-import { createSurveyPlan, getSurveyPlan, approveSurveyPlan, rejectSurveyPlan, updateSurveyPlan, generateSurveyRules, generateQuestions } from "@/lib/plannerBackend";
+import {
+  createSurveyPlan,
+  getSurveyPlan,
+  approveSurveyPlan,
+  rejectSurveyPlan,
+  updateSurveyPlan,
+  generateSurveyRules,
+  generateQuestions,
+  deleteQuestion,
+  deletePage,
+} from "@/lib/plannerBackend";
 import { toPlannerLanguageCode } from "@/lib/language";
 import { PromptValidationError } from "@/lib/promptValidationError";
 
@@ -274,7 +286,11 @@ function generateMockSurveyStructure(data: GenerateSurveyRequest) {
   const { prompt, numQuestions, numPages, language } = data;
   
   // Extract key topics from prompt
-  const keywords = prompt.toLowerCase().split(/\s+/).filter(w => w.length > 4).slice(0, 3);
+  const keywords = prompt
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w: string) => w.length > 4)
+    .slice(0, 3);
   const surveyName = prompt.length > 50 ? prompt.substring(0, 50) + "..." : prompt;
   
   // Generate sections based on numPages
@@ -521,7 +537,8 @@ export function useGetSurveyPlan(thread_id: string | null) {
         // Provide detailed error messages
         let message = "An unknown error occurred";
         if (error instanceof TypeError && error.message.includes("fetch")) {
-          message = "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+          message =
+            "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
         } else if (error instanceof Error) {
           message = error.message;
         } else {
@@ -529,14 +546,6 @@ export function useGetSurveyPlan(thread_id: string | null) {
         }
         throw new Error(message);
       }
-    },
-    onError: (error) => {
-      const errorMessage = error instanceof Error ? error.message : "Failed to retrieve survey plan. Please try again.";
-      toast({
-        title: "Plan retrieval failed",
-        description: errorMessage,
-        variant: "destructive"
-      });
     },
     // Retry configuration - retry up to 3 times with exponential backoff
     retry: 3,
@@ -880,24 +889,115 @@ export function useGenerateQuestions() {
         throw new Error(message);
       }
     },
-    onSuccess: (data) => {
-      // Count total questions from rendered_pages
-      const totalQuestions = data.rendered_pages?.reduce((acc, page) => {
-        return acc + (Array.isArray(page.questions) ? page.questions.length : 0);
-      }, 0) || 0;
-      
-      toast({
-        title: "Questions generated successfully",
-        description: `Generated ${totalQuestions} question${totalQuestions !== 1 ? 's' : ''} for your survey.`,
-        variant: "default"
-      });
-    },
     onError: (error) => {
-      const errorMessage = error instanceof Error ? error.message : "Failed to generate survey questions. Please try again.";
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate survey questions. Please try again.";
       toast({
         title: "Question generation failed",
         description: errorMessage,
-        variant: "destructive"
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+/**
+ * Delete a question from a survey plan using the planner API.
+ *
+ * This hook calls DELETE /api/upsert-survey/survey-plan/{thread_id}/question/{spec_id}
+ * to delete a question from the survey plan. After deletion, remaining questions are
+ * automatically renumbered.
+ *
+ * @returns Mutation hook for deleting questions
+ */
+export function useDeleteQuestion() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({
+      thread_id,
+      spec_id,
+    }: {
+      thread_id: string;
+      spec_id: string;
+    }) => {
+      try {
+        // Call planner backend to delete a specific question by spec_id.
+        return await deleteQuestion(thread_id, spec_id);
+      } catch (error) {
+        // Provide detailed error messages.
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message =
+            "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onError: (error) => {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to delete question. Please try again.";
+      toast({
+        title: "Delete failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    },
+  });
+}
+
+/**
+ * Delete a page from a survey plan using the planner API.
+ *
+ * This hook calls DELETE /api/upsert-survey/survey-plan/{thread_id}/page/{page_number} to delete
+ * a page from the survey plan. After deletion, remaining pages are automatically renumbered.
+ *
+ * @returns Mutation hook for deleting pages
+ */
+export function useDeletePage() {
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({
+      thread_id,
+      page_number,
+    }: {
+      thread_id: string;
+      page_number: number;
+    }) => {
+      try {
+        return await deletePage(thread_id, page_number);
+      } catch (error) {
+        // Provide detailed error messages.
+        let message = "An unknown error occurred";
+        if (error instanceof TypeError && error.message.includes("fetch")) {
+          message =
+            "Failed to fetch: Could not reach the planner API. Check if the backend is running and the URL is correct.";
+        } else if (error instanceof Error) {
+          message = error.message;
+        } else {
+          message = String(error);
+        }
+        throw new Error(message);
+      }
+    },
+    onError: (error) => {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : "Failed to delete page. Please try again.";
+      toast({
+        title: "Delete failed",
+        description: errorMessage,
+        variant: "destructive",
       });
     },
   });

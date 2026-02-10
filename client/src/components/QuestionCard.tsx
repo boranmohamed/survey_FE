@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trash2 } from "lucide-react";
 import { StarRating } from "./StarRating";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
@@ -7,6 +8,7 @@ import { Label } from "./ui/label";
 import { Checkbox } from "./ui/checkbox";
 import { Badge } from "./ui/badge";
 import { Slider } from "./ui/slider";
+import { Button } from "./ui/button";
 import {
   Select,
   SelectContent,
@@ -88,6 +90,15 @@ interface QuestionCardProps {
    * Whether to show the metadata accordion section (default: false)
    */
   showMetadata?: boolean;
+  /**
+   * Callback function called when delete button is clicked
+   * Only shown if this prop is provided
+   */
+  onDelete?: () => void;
+  /**
+   * Whether the delete action is in progress
+   */
+  isDeleting?: boolean;
 }
 
 /**
@@ -126,7 +137,9 @@ export function QuestionCard({
   validation,
   skip_logic,
   scale,
-  showMetadata = false
+  showMetadata = false,
+  onDelete,
+  isDeleting = false
 }: QuestionCardProps) {
   // Map legacy types to new types for backward compatibility
   const normalizedType: QuestionType = 
@@ -190,6 +203,23 @@ export function QuestionCard({
           {question}
           {required && <span className="text-destructive ml-1">*</span>}
         </h3>
+        {/* Delete button - only shown if onDelete callback is provided */}
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDelete}
+            disabled={isDeleting}
+            className="text-destructive hover:text-destructive hover:bg-destructive/10 flex-shrink-0"
+            aria-label="Delete question"
+          >
+            {isDeleting ? (
+              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+          </Button>
+        )}
       </div>
 
       {/* Question Input Based on Type */}

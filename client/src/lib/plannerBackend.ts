@@ -1,13 +1,11 @@
 import { 
   api, 
-  buildUrl,
   type CreateSurveyPlanRequest, 
   type CreateSurveyPlanResponse,
   type SurveyPlanResponse,
   type GenerateValidateFixResponse,
   type RenderedPage
 } from "@shared/routes";
-import { handlePromptValidationError } from "./promptValidationError";
 
 /**
  * Planner backend integration (Python/FastAPI).
@@ -21,60 +19,10 @@ import { handlePromptValidationError } from "./promptValidationError";
  * - Example values:
  *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000`
  *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000/anomaly`
- *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.70:8000` (if the backend runs on another machine)
  */
 
 // Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
-// Default to localhost for the common case (planner backend running on the same machine).
-// We intentionally do NOT hardcode a specific LAN IP here because it changes per network/device.
 const DEFAULT_PLANNER_API_BASE_URL = "http://127.0.0.1:8000";
-
-/**
- * Helper function to keep "localhost" usable when the UI is opened from another device.
- *
- * Problem:
- * - If a phone opens the UI at `http://192.168.x.y:5000`, and the planner base URL is
- *   `http://127.0.0.1:8000`, the phone will try to call *its own* localhost (wrong).
- *
- * Solution:
- * - If the configured base URL points to localhost, rewrite the host to the current page host.
- * - This means:
- *   - UI opened via `localhost:5000`  -> planner stays `localhost/127.0.0.1:8000`
- *   - UI opened via `192.168.x.y:5000` -> planner becomes `192.168.x.y:8000`
- *
- * If you want to call a different machine, set `VITE_PLANNER_API_BASE_URL` explicitly.
- */
-function ensureNetworkIP(url: string): string {
-  const isLocalHost =
-    url.includes("localhost") || url.includes("127.0.0.1");
-
-  if (!isLocalHost) return url;
-
-  // In SSR / build steps there is no window. In that case, keep as-is.
-  if (typeof window === "undefined") return url;
-
-  const currentHost = window.location.hostname;
-  if (!currentHost) return url;
-
-  // If we're already on localhost, no need to rewrite.
-  if (currentHost === "localhost" || currentHost === "127.0.0.1") return url;
-
-  // Keep the existing port if present, default to 8000 otherwise.
-  const portMatch = url.match(/:(\d+)/);
-  const port = portMatch ? portMatch[1] : "8000";
-  const newUrl = url.replace(/https?:\/\/[^\/]+/, `http://${currentHost}:${port}`);
-  console.warn("⚠️ Replaced localhost with current host for LAN access:", url, "→", newUrl);
-  return newUrl;
-}
-
-/**
- * Get the planner API base URL, ensuring it never uses localhost.
- */
-function getPlannerBaseUrl(): string {
-  const envUrl = import.meta.env.VITE_PLANNER_API_BASE_URL;
-  const baseUrl = envUrl ?? DEFAULT_PLANNER_API_BASE_URL;
-  return ensureNetworkIP(baseUrl);
-}
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -93,8 +41,7 @@ function toggleAnomalyPrefix(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   const anomalySuffix = "/anomaly";
   if (trimmed.toLowerCase().endsWith(anomalySuffix)) {
-    // Fallback to default base URL if the trimmed base becomes empty.
-    return trimmed.slice(0, -anomalySuffix.length) || DEFAULT_PLANNER_API_BASE_URL;
+    return trimmed.slice(0, -anomalySuffix.length) || "http://127.0.0.1:8000";
   }
   return `${trimmed}${anomalySuffix}`;
 }
@@ -109,13 +56,8 @@ function toggleAnomalyPrefix(baseUrl: string): string {
 export async function createSurveyPlan(
   data: CreateSurveyPlanRequest,
 ): Promise<CreateSurveyPlanResponse> {
-  // Get base URL from environment variable or use default
-  // Automatically ensures network IP is used (never localhost)
-  const baseUrl = getPlannerBaseUrl();
-
-  // Debug: Log the base URL being used
-  console.log("🔍 Planner API Base URL:", baseUrl);
-  console.log("🔍 Environment variable VITE_PLANNER_API_BASE_URL:", import.meta.env.VITE_PLANNER_API_BASE_URL);
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -128,48 +70,29 @@ export async function createSurveyPlan(
     ]),
   );
 
-  // Debug: Log all candidate URLs being tried
-  console.log("🔍 Trying candidate URLs:", candidateUrls);
-
   const doPost = async (url: string) => {
-    try {
-      console.log("🔍 Attempting POST to:", url);
-      const res = await fetch(url, {
-        method: api.planner.create.method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-      const text = await res.text();
-      console.log("🔍 Response status:", res.status, "for URL:", url);
-      return { res, text };
-    } catch (error) {
-      // Handle network errors (CORS, connection refused, etc.)
-      console.error("🔍 Network error for URL:", url, error);
-      throw error;
-    }
+    const res = await fetch(url, {
+      method: api.planner.create.method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    });
+    const text = await res.text();
+    return { res, text };
   };
 
   let lastStatus = 0;
   let lastText = "";
   let finalJson: unknown = null;
-  let lastError: Error | null = null;
 
   // Try each candidate URL until one succeeds
   for (const url of candidateUrls) {
-    try {
-      const { res, text } = await doPost(url);
-      lastStatus = res.status;
-      lastText = text;
+    const { res, text } = await doPost(url);
+    lastStatus = res.status;
+    lastText = text;
 
     if (!res.ok) {
       // Only retry on 404 (wrong URL). For other errors, fail fast.
       if (res.status === 404) continue;
-      
-      // Check if this is a prompt validation error (422)
-      // This will throw a PromptValidationError with user-friendly message and suggested_prompt
-      handlePromptValidationError(res.status, text);
-      
-      // Handle other types of errors normally
       throw new Error(`Planner API error (${res.status}). ${text || res.statusText}`);
     }
 
@@ -181,32 +104,13 @@ export async function createSurveyPlan(
 
     // Success: stop trying other URLs.
     break;
-    } catch (error) {
-      // Catch network errors (CORS, connection refused, etc.)
-      lastError = error as Error;
-      console.error("🔍 Error trying URL:", url, error);
-      // If this is a network error (not a 404), we should fail immediately
-      // Network errors typically mean the server isn't reachable
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        // This is likely a CORS or connection error
-        throw new Error(
-          `Failed to reach planner API at ${url}. Check if the backend is running and CORS is configured. Error: ${error.message}`
-        );
-      }
-      // For 404s, continue to next URL
-      // For other errors, rethrow
-      if (lastStatus !== 404) {
-        throw error;
-      }
-    }
   }
 
   // If we exhausted candidates without success, show what we tried.
-  if (lastStatus === 404 || lastError) {
-    const errorMsg = lastError 
-      ? `Failed to reach planner API. ${lastError.message}. Tried: ${candidateUrls.join(", ")}`
-      : `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`;
-    throw new Error(errorMsg);
+  if (lastStatus === 404) {
+    throw new Error(
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
   }
 
   // Log the full response for debugging
@@ -251,12 +155,13 @@ export async function createSurveyPlan(
 export async function getSurveyPlan(
   thread_id: string,
 ): Promise<SurveyPlanResponse> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
-  const path = buildUrl(api.planner.get.path, { thread_id });
+  // Replace :thread_id parameter in the path (buildUrl would return full URL, but we need just the path)
+  const path = api.planner.get.path.replace(':thread_id', thread_id);
   
   const candidateUrls = Array.from(
     new Set([
@@ -373,8 +278,8 @@ export async function getSurveyPlan(
 export async function approveSurveyPlan(
   thread_id: string,
 ): Promise<SurveyPlanResponse> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -499,8 +404,8 @@ export async function rejectSurveyPlan(
   thread_id: string,
   feedback: string,
 ): Promise<SurveyPlanResponse> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -643,8 +548,8 @@ export async function generateValidateFixQuestions(
   thread_id: string,
   auto_fix: boolean = true,
 ): Promise<GenerateValidateFixResponse> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -746,6 +651,311 @@ export async function generateValidateFixQuestions(
 }
 
 /**
+ * Generate questions for a survey plan by calling the POST generate-questions endpoint.
+ * Generates survey questions from an approved survey plan.
+ *
+ * This is a lightweight wrapper around the planner API that mirrors the behavior of
+ * `generateValidateFixQuestions` but without the validation/fix step.
+ *
+ * @param thread_id - The unique thread identifier for the approved plan
+ * @returns Response containing rendered pages with questions
+ */
+export async function generateQuestions(
+  thread_id: string,
+): Promise<GenerateValidateFixResponse> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/upsert-survey/survey-plan/${thread_id}/generate-questions`;
+
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  const doPost = async (url: string) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}), // Empty body is acceptable
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doPost(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+      throw new Error(`Planner API error (${res.status}). ${text || res.statusText}`);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Planner API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full planner API generate-questions response:", JSON.stringify(finalJson, null, 2));
+
+  // Extract data from various possible response structures
+  if (!finalJson || typeof finalJson !== "object") {
+    throw new Error("Planner API returned invalid response");
+  }
+
+  const response = finalJson as any;
+
+  // Extract fields from either data object or root level
+  const data = response.data || response;
+
+  // Extract thread_id
+  const threadId = data.thread_id || response.thread_id || thread_id;
+  if (!threadId) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  // Extract rendered_pages
+  const renderedPages = data.rendered_pages || response.rendered_pages;
+  if (!renderedPages || !Array.isArray(renderedPages)) {
+    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rendered_pages");
+  }
+
+  // Return normalized response with all fields at root level
+  const normalizedResponse: GenerateValidateFixResponse = {
+    meta: response.meta,
+    status: response.status || { code: "success", message: "Questions generated successfully" },
+    thread_id: threadId,
+    rendered_pages: renderedPages,
+    error: data.error || response.error || null,
+    validation: data.validation || response.validation || null,
+    saved: data.saved !== undefined ? data.saved : response.saved,
+  };
+
+  console.log("✅ Normalized generate-questions response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+
+/**
+ * Generate survey rules by calling the POST generate rules endpoint.
+ * Generates validation and conditional rules for the survey based on user prompt.
+ *
+ * This wrapper keeps the planner API contract isolated from UI components.
+ *
+ * @param thread_id - The unique thread identifier for the survey
+ * @param options - Optional parameters for rule generation
+ * @param options.user_prompt - Custom instructions for rule generation
+ * @param options.expected_rules_count - Target number of rules (default: 8, min: 1, max: 50)
+ * @returns Response containing generated rules and validation summary
+ */
+export async function generateSurveyRules(
+  thread_id: string,
+  options?: {
+    user_prompt?: string;
+    expected_rules_count?: number;
+  }
+): Promise<{
+  thread_id: string;
+  rules: {
+    survey_rules: Array<{
+      meta_rule: {
+        rule_id: string;
+        rule_type: string;
+        description_en: string;
+        description_ar: string;
+      };
+      conditions: Array<{
+        left_side: {
+          type: string;
+          question_id: string;
+          data_type?: string;
+        };
+        operator: string;
+        right_side: {
+          type: string;
+          value: any;
+          data_type?: string;
+        };
+      }>;
+      actions: Array<{
+        type: string;
+        action_element: string;
+        message_en?: string;
+        message_ar?: string;
+        sequence?: number;
+        action_answer?: string;
+      }>;
+    }>;
+  };
+  critique_summary?: {
+    initial_validation: {
+      valid_count: number;
+      invalid_count: number;
+      errors_by_category?: Record<string, any>;
+    };
+    after_fixing: {
+      valid_count: number;
+      invalid_count: number;
+    };
+    final_rules_count: number;
+  };
+}> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/agentic-survey/${thread_id}/rules/generate`;
+
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  // Build request body - only include fields that are provided
+  const requestBody: any = {};
+  if (options?.user_prompt !== undefined) {
+    requestBody.user_prompt = options.user_prompt;
+  }
+  if (options?.expected_rules_count !== undefined) {
+    requestBody.expected_rules_count = options.expected_rules_count;
+  }
+
+  const doPost = async (url: string) => {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doPost(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+
+      // Try to parse error response for better error messages.
+      let errorMessage = `Rules generation API error (${res.status}). ${text || res.statusText}`;
+      try {
+        const errorData = text ? JSON.parse(text) : null;
+        if (errorData?.detail) {
+          // Handle both string and array detail formats.
+          if (typeof errorData.detail === "string") {
+            errorMessage = errorData.detail;
+          } else if (Array.isArray(errorData.detail)) {
+            // Validation errors - format them nicely.
+            const errors = errorData.detail
+              .map((err: any) => `${err.loc?.join(".")}: ${err.msg}`)
+              .join("; ");
+            errorMessage = `Validation error: ${errors}`;
+          } else {
+            errorMessage = JSON.stringify(errorData.detail);
+          }
+        } else if (errorData?.status?.message) {
+          errorMessage = errorData.status.message;
+        }
+      } catch {
+        // Use default error message.
+      }
+      throw new Error(errorMessage);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Rules generation API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Rules generation API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full rules generation API response:", JSON.stringify(finalJson, null, 2));
+
+  // Validate response structure
+  if (!finalJson || typeof finalJson !== "object") {
+    throw new Error("Rules generation API returned invalid response");
+  }
+
+  const response = finalJson as any;
+
+  // Extract data from either data object or root level
+  const data = response.data || response;
+
+  // Validate required fields
+  if (!data.thread_id && !response.thread_id) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  if (!data.rules && !response.rules) {
+    console.error("❌ Could not find rules in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rules");
+  }
+
+  // Return normalized response
+  const normalizedResponse = {
+    thread_id: data.thread_id || response.thread_id || thread_id,
+    rules: data.rules || response.rules,
+    critique_summary: data.critique_summary || response.critique_summary,
+  };
+
+  console.log("✅ Normalized rules generation response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+
+/**
  * Update a survey plan by calling the POST update endpoint.
  * Updates the survey plan from natural language instructions, generates questions,
  * and returns the rendered survey.
@@ -766,8 +976,8 @@ export async function updateSurveyPlan(
   validation?: any;
   saved?: boolean;
 }> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
@@ -884,200 +1094,28 @@ export async function updateSurveyPlan(
 }
 
 /**
- * Generate questions for a survey plan by calling the POST generate-questions endpoint.
- * Generates survey questions from an approved survey plan.
+ * Delete a question from a survey plan by calling the DELETE endpoint.
+ * After deletion, remaining questions are automatically renumbered.
  * 
- * @param thread_id - The unique thread identifier for the approved plan
- * @returns Response containing rendered pages with questions
+ * @param thread_id - The unique thread identifier for the survey plan
+ * @param spec_id - The spec_id of the question to delete (format: p{page}_q{question})
+ * @returns Response containing updated rendered pages with remaining questions
  */
-export async function generateQuestions(
+export async function deleteQuestion(
   thread_id: string,
-): Promise<GenerateValidateFixResponse> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
-
-  // Try multiple URL variants to handle different deployment configurations
-  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
-  const path = `/api/upsert-survey/survey-plan/${thread_id}/generate-questions`;
-  
-  const candidateUrls = Array.from(
-    new Set([
-      joinUrl(baseUrl, path),
-      joinUrl(baseUrl, `${path}/`),
-      joinUrl(altBaseUrl, path),
-      joinUrl(altBaseUrl, `${path}/`),
-    ]),
-  );
-
-  const doPost = async (url: string) => {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}), // Empty body is acceptable
-    });
-    const text = await res.text();
-    return { res, text };
-  };
-
-  let lastStatus = 0;
-  let lastText = "";
-  let finalJson: unknown = null;
-
-  // Try each candidate URL until one succeeds
-  for (const url of candidateUrls) {
-    try {
-      const { res, text } = await doPost(url);
-      lastStatus = res.status;
-      lastText = text;
-
-      if (!res.ok) {
-        // Only retry on 404 (wrong URL). For other errors, fail fast.
-        if (res.status === 404) continue;
-        throw new Error(`Planner API error (${res.status}). ${text || res.statusText}`);
-      }
-
-      try {
-        finalJson = text ? JSON.parse(text) : null;
-      } catch {
-        throw new Error("Planner API returned a non-JSON response.");
-      }
-
-      // Success: stop trying other URLs.
-      break;
-    } catch (error) {
-      // Catch network errors (CORS, connection refused, etc.)
-      console.error("🔍 Error trying URL:", url, error);
-      // If this is a network error (not a 404), we should fail immediately
-      if (error instanceof TypeError && error.message.includes('fetch')) {
-        throw new Error(
-          `Failed to reach planner API at ${url}. Check if the backend is running and CORS is configured. Error: ${error.message}`
-        );
-      }
-      // For 404s, continue to next URL
-      // For other errors, rethrow
-      if (lastStatus !== 404) {
-        throw error;
-      }
-    }
-  }
-
-  // If we exhausted candidates without success, show what we tried.
-  if (lastStatus === 404) {
-    throw new Error(
-      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
-    );
-  }
-
-  // Log the full response for debugging
-  console.log("🔍 Full planner API generate-questions response:", JSON.stringify(finalJson, null, 2));
-
-  // Extract data from various possible response structures
-  if (!finalJson || typeof finalJson !== 'object') {
-    throw new Error("Planner API returned invalid response");
-  }
-
-  const response = finalJson as any;
-  
-  // Extract fields from either data object or root level
-  const data = response.data || response;
-  
-  // Extract thread_id
-  const threadId = data.thread_id || response.thread_id;
-  if (!threadId) {
-    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
-    throw new Error("Response does not contain thread_id");
-  }
-
-  // Extract rendered_pages
-  const renderedPages = data.rendered_pages || response.rendered_pages;
-  if (!renderedPages || !Array.isArray(renderedPages)) {
-    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
-    throw new Error("Response does not contain rendered_pages");
-  }
-
-  // Return normalized response with all fields at root level
-  const normalizedResponse: GenerateValidateFixResponse = {
-    meta: response.meta,
-    status: response.status || { code: "success", message: "Questions generated successfully" },
-    thread_id: threadId,
-    rendered_pages: renderedPages,
-    error: data.error || response.error || null,
-    validation: data.validation || response.validation || null,
-    saved: data.saved !== undefined ? data.saved : response.saved,
-  };
-
-  console.log("✅ Normalized generate-questions response:", JSON.stringify(normalizedResponse, null, 2));
-  return normalizedResponse;
-}
-
-/**
- * Generate survey rules by calling the POST generate rules endpoint.
- * Generates validation and conditional rules for the survey based on user prompt.
- * 
- * @param thread_id - The unique thread identifier for the survey
- * @param options - Optional parameters for rule generation
- * @param options.user_prompt - Custom instructions for rule generation
- * @param options.expected_rules_count - Target number of rules (default: 8, min: 1, max: 50)
- * @returns Response containing generated rules and validation summary
- */
-export async function generateSurveyRules(
-  thread_id: string,
-  options?: {
-    user_prompt?: string;
-    expected_rules_count?: number;
-  }
+  spec_id: string,
 ): Promise<{
+  meta?: any;
+  status: { code: string; message: string };
   thread_id: string;
-  rules: {
-    survey_rules: Array<{
-      meta_rule: {
-        rule_id: string;
-        rule_type: string;
-        description_en: string;
-        description_ar: string;
-      };
-      conditions: Array<{
-        left_side: {
-          type: string;
-          question_id: string;
-          data_type?: string;
-        };
-        operator: string;
-        right_side: {
-          type: string;
-          value: any;
-          data_type?: string;
-        };
-      }>;
-      actions: Array<{
-        type: string;
-        action_element: string;
-        message_en?: string;
-        message_ar?: string;
-        sequence?: number;
-        action_answer?: string;
-      }>;
-    }>;
-  };
-  critique_summary?: {
-    initial_validation: {
-      valid_count: number;
-      invalid_count: number;
-      errors_by_category?: Record<string, any>;
-    };
-    after_fixing: {
-      valid_count: number;
-      invalid_count: number;
-    };
-    final_rules_count: number;
-  };
+  rendered_pages: RenderedPage[];
 }> {
-  // Get base URL, ensuring it never uses localhost
-  const baseUrl = getPlannerBaseUrl();
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
 
   // Try multiple URL variants to handle different deployment configurations
   const altBaseUrl = toggleAnomalyPrefix(baseUrl);
-  const path = `/api/agentic-survey/${thread_id}/rules/generate`;
+  const path = `/api/upsert-survey/survey-plan/${thread_id}/question/${spec_id}`;
   
   const candidateUrls = Array.from(
     new Set([
@@ -1088,20 +1126,10 @@ export async function generateSurveyRules(
     ]),
   );
 
-  // Build request body - only include fields that are provided
-  const requestBody: any = {};
-  if (options?.user_prompt !== undefined) {
-    requestBody.user_prompt = options.user_prompt;
-  }
-  if (options?.expected_rules_count !== undefined) {
-    requestBody.expected_rules_count = options.expected_rules_count;
-  }
-
-  const doPost = async (url: string) => {
+  const doDelete = async (url: string) => {
     const res = await fetch(url, {
-      method: "POST",
+      method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
     });
     const text = await res.text();
     return { res, text };
@@ -1113,7 +1141,7 @@ export async function generateSurveyRules(
 
   // Try each candidate URL until one succeeds
   for (const url of candidateUrls) {
-    const { res, text } = await doPost(url);
+    const { res, text } = await doDelete(url);
     lastStatus = res.status;
     lastText = text;
 
@@ -1121,28 +1149,12 @@ export async function generateSurveyRules(
       // Only retry on 404 (wrong URL). For other errors, fail fast.
       if (res.status === 404) continue;
       
-      // Check if this is a prompt validation error (422)
-      // This will throw a PromptValidationError with user-friendly message and suggested_prompt
-      handlePromptValidationError(res.status, text);
-      
-      // Handle other types of errors normally
-      // Try to parse error response for better error messages
-      let errorMessage = `Rules generation API error (${res.status}). ${text || res.statusText}`;
+      // Try to parse error response
+      let errorMessage = `Planner API error (${res.status}). ${text || res.statusText}`;
       try {
         const errorData = text ? JSON.parse(text) : null;
         if (errorData?.detail) {
-          // Handle both string and array detail formats
-          if (typeof errorData.detail === 'string') {
-            errorMessage = errorData.detail;
-          } else if (Array.isArray(errorData.detail)) {
-            // Validation errors - format them nicely
-            const errors = errorData.detail.map((err: any) => 
-              `${err.loc?.join('.')}: ${err.msg}`
-            ).join('; ');
-            errorMessage = `Validation error: ${errors}`;
-          } else {
-            errorMessage = JSON.stringify(errorData.detail);
-          }
+          errorMessage = errorData.detail;
         } else if (errorData?.status?.message) {
           errorMessage = errorData.status.message;
         }
@@ -1155,7 +1167,7 @@ export async function generateSurveyRules(
     try {
       finalJson = text ? JSON.parse(text) : null;
     } catch {
-      throw new Error("Rules generation API returned a non-JSON response.");
+      throw new Error("Planner API returned a non-JSON response.");
     }
 
     // Success: stop trying other URLs.
@@ -1165,16 +1177,16 @@ export async function generateSurveyRules(
   // If we exhausted candidates without success, show what we tried.
   if (lastStatus === 404) {
     throw new Error(
-      `Rules generation API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
     );
   }
 
   // Log the full response for debugging
-  console.log("🔍 Full rules generation API response:", JSON.stringify(finalJson, null, 2));
+  console.log("🔍 Full planner API delete question response:", JSON.stringify(finalJson, null, 2));
 
-  // Validate response structure
+  // Extract data from various possible response structures
   if (!finalJson || typeof finalJson !== 'object') {
-    throw new Error("Rules generation API returned invalid response");
+    throw new Error("Planner API returned invalid response");
   }
 
   const response = finalJson as any;
@@ -1182,25 +1194,156 @@ export async function generateSurveyRules(
   // Extract data from either data object or root level
   const data = response.data || response;
   
-  // Validate required fields
-  if (!data.thread_id && !response.thread_id) {
+  // Extract thread_id
+  const threadId = data.thread_id || response.thread_id || thread_id;
+  if (!threadId) {
     console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
     throw new Error("Response does not contain thread_id");
   }
 
-  if (!data.rules && !response.rules) {
-    console.error("❌ Could not find rules in response:", JSON.stringify(finalJson, null, 2));
-    throw new Error("Response does not contain rules");
+  // Extract rendered_pages
+  const renderedPages = data.rendered_pages || response.rendered_pages;
+  if (!renderedPages || !Array.isArray(renderedPages)) {
+    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rendered_pages");
   }
 
   // Return normalized response
   const normalizedResponse = {
-    thread_id: data.thread_id || response.thread_id || thread_id,
-    rules: data.rules || response.rules,
-    critique_summary: data.critique_summary || response.critique_summary,
+    meta: response.meta,
+    status: response.status || { code: "success", message: "Question deleted successfully" },
+    thread_id: threadId,
+    rendered_pages: renderedPages,
   };
 
-  console.log("✅ Normalized rules generation response:", JSON.stringify(normalizedResponse, null, 2));
+  console.log("✅ Normalized delete question response:", JSON.stringify(normalizedResponse, null, 2));
+  return normalizedResponse;
+}
+
+/**
+ * Delete a page from a survey plan by calling the DELETE endpoint.
+ * After deletion, remaining pages are automatically renumbered.
+ * 
+ * @param thread_id - The unique thread identifier for the survey plan
+ * @param page_number - The page number to delete (1-indexed, e.g., 1 for first page, 2 for second page)
+ * @returns Response containing updated rendered pages with remaining pages
+ */
+export async function deletePage(
+  thread_id: string,
+  page_number: number,
+): Promise<{
+  meta?: any;
+  status: { code: string; message: string };
+  thread_id: string;
+  rendered_pages: RenderedPage[];
+}> {
+  const baseUrl =
+    (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
+
+  // Try multiple URL variants to handle different deployment configurations
+  const altBaseUrl = toggleAnomalyPrefix(baseUrl);
+  const path = `/api/upsert-survey/survey-plan/${thread_id}/page/${page_number}`;
+  
+  const candidateUrls = Array.from(
+    new Set([
+      joinUrl(baseUrl, path),
+      joinUrl(baseUrl, `${path}/`),
+      joinUrl(altBaseUrl, path),
+      joinUrl(altBaseUrl, `${path}/`),
+    ]),
+  );
+
+  const doDelete = async (url: string) => {
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
+    const text = await res.text();
+    return { res, text };
+  };
+
+  let lastStatus = 0;
+  let lastText = "";
+  let finalJson: unknown = null;
+
+  // Try each candidate URL until one succeeds
+  for (const url of candidateUrls) {
+    const { res, text } = await doDelete(url);
+    lastStatus = res.status;
+    lastText = text;
+
+    if (!res.ok) {
+      // Only retry on 404 (wrong URL). For other errors, fail fast.
+      if (res.status === 404) continue;
+      
+      // Try to parse error response
+      let errorMessage = `Planner API error (${res.status}). ${text || res.statusText}`;
+      try {
+        const errorData = text ? JSON.parse(text) : null;
+        if (errorData?.detail) {
+          errorMessage = errorData.detail;
+        } else if (errorData?.status?.message) {
+          errorMessage = errorData.status.message;
+        }
+      } catch {
+        // Use default error message
+      }
+      throw new Error(errorMessage);
+    }
+
+    try {
+      finalJson = text ? JSON.parse(text) : null;
+    } catch {
+      throw new Error("Planner API returned a non-JSON response.");
+    }
+
+    // Success: stop trying other URLs.
+    break;
+  }
+
+  // If we exhausted candidates without success, show what we tried.
+  if (lastStatus === 404) {
+    throw new Error(
+      `Planner API error (404). The endpoint was not found. Tried: ${candidateUrls.join(", ")}`,
+    );
+  }
+
+  // Log the full response for debugging
+  console.log("🔍 Full planner API delete page response:", JSON.stringify(finalJson, null, 2));
+
+  // Extract data from various possible response structures
+  if (!finalJson || typeof finalJson !== 'object') {
+    throw new Error("Planner API returned invalid response");
+  }
+
+  const response = finalJson as any;
+  
+  // Extract data from either data object or root level
+  const data = response.data || response;
+  
+  // Extract thread_id
+  const threadId = data.thread_id || response.thread_id || thread_id;
+  if (!threadId) {
+    console.error("❌ Could not find thread_id in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain thread_id");
+  }
+
+  // Extract rendered_pages
+  const renderedPages = data.rendered_pages || response.rendered_pages;
+  if (!renderedPages || !Array.isArray(renderedPages)) {
+    console.error("❌ Could not find rendered_pages in response:", JSON.stringify(finalJson, null, 2));
+    throw new Error("Response does not contain rendered_pages");
+  }
+
+  // Return normalized response
+  const normalizedResponse = {
+    meta: response.meta,
+    status: response.status || { code: "success", message: "Page deleted successfully" },
+    thread_id: threadId,
+    rendered_pages: renderedPages,
+  };
+
+  console.log("✅ Normalized delete page response:", JSON.stringify(normalizedResponse, null, 2));
   return normalizedResponse;
 }
 

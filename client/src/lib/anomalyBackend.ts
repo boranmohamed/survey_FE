@@ -1,4 +1,5 @@
-import { api, type GenerateSurveyRequest, type GenerateSurveyResponse } from "@shared/routes";
+import { api, type GenerateSurveyResponse } from "@shared/routes";
+import { type GenerateSurveyRequest } from "@shared/schema";
 import { handlePromptValidationError } from "./promptValidationError";
 
 /**
