@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HistorySidebar } from "@/components/HistorySidebar";
 import { useGenerateSurveyRules, useGenerateQuestions, useUpdateSurvey, PromptValidationError } from "@/hooks/use-surveys";
+import { RulesGenerationValidationError } from "@/lib/rulesGenerationError";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -162,8 +163,12 @@ export default function RulesPage() {
         // The error toast is already shown by the hook's onError handler
         console.log("📝 Updated rule requirements with suggestion:", error.suggestedPrompt);
       }
+      // Don't log 422 validation errors as console errors - they're user-facing validation issues
+      if (!(error instanceof RulesGenerationValidationError)) {
+        // Only log real errors (500+, network errors, etc.)
+        console.error("Error generating rules:", error);
+      }
       // Error is handled by the hook's onError callback (toast notification)
-      console.error("Error generating rules:", error);
       // Clear rules on error
       setGeneratedRules(null);
     }

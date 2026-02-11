@@ -6,6 +6,7 @@ import {
   type GenerateValidateFixResponse,
   type RenderedPage
 } from "@shared/routes";
+import { RulesGenerationValidationError } from "./rulesGenerationError";
 
 /**
  * Planner backend integration (Python/FastAPI).
@@ -877,16 +878,68 @@ export async function generateSurveyRules(
       // Only retry on 404 (wrong URL). For other errors, fail fast.
       if (res.status === 404) continue;
 
-      // Try to parse error response for better error messages.
+      // Handle 422 (validation error) separately - don't treat as console error
+      if (res.status === 422) {
+        // Parse JSON body to extract error details
+        let errorMessage = "Couldn't generate valid rules. Try rephrasing your request.";
+        try {
+          const errorData = text ? JSON.parse(text) : null;
+          if (errorData?.detail) {
+            // Handle both string and object detail formats
+            if (typeof errorData.detail === "string") {
+              errorMessage = errorData.detail;
+            } else if (typeof errorData.detail === "object") {
+              // Try to extract a user-friendly message
+              if (errorData.detail.message) {
+                errorMessage = errorData.detail.message;
+              } else {
+                errorMessage = "Couldn't generate valid rules. Try rephrasing your request.";
+              }
+            }
+          } else if (errorData?.message) {
+            errorMessage = errorData.message;
+          }
+        } catch {
+          // Use default error message if parsing fails
+        }
+        // Throw custom error that won't be logged as console error
+        throw new RulesGenerationValidationError(errorMessage);
+      }
+
+      // For real server failures (500+), log as error
+      if (res.status >= 500) {
+        let errorMessage = `Rules generation API error (${res.status}). ${text || res.statusText}`;
+        try {
+          const errorData = text ? JSON.parse(text) : null;
+          if (errorData?.detail) {
+            if (typeof errorData.detail === "string") {
+              errorMessage = errorData.detail;
+            } else if (Array.isArray(errorData.detail)) {
+              const errors = errorData.detail
+                .map((err: any) => `${err.loc?.join(".")}: ${err.msg}`)
+                .join("; ");
+              errorMessage = `Validation error: ${errors}`;
+            } else {
+              errorMessage = JSON.stringify(errorData.detail);
+            }
+          } else if (errorData?.status?.message) {
+            errorMessage = errorData.status.message;
+          }
+        } catch {
+          // Use default error message
+        }
+        console.error("Rules generation API server error:", errorMessage);
+        throw new Error(errorMessage);
+      }
+
+      // For other errors (400-499 except 422), handle normally
       let errorMessage = `Rules generation API error (${res.status}). ${text || res.statusText}`;
       try {
         const errorData = text ? JSON.parse(text) : null;
         if (errorData?.detail) {
-          // Handle both string and array detail formats.
           if (typeof errorData.detail === "string") {
             errorMessage = errorData.detail;
           } else if (Array.isArray(errorData.detail)) {
-            // Validation errors - format them nicely.
             const errors = errorData.detail
               .map((err: any) => `${err.loc?.join(".")}: ${err.msg}`)
               .join("; ");
@@ -898,7 +951,7 @@ export async function generateSurveyRules(
           errorMessage = errorData.status.message;
         }
       } catch {
-        // Use default error message.
+        // Use default error message
       }
       throw new Error(errorMessage);
     }
