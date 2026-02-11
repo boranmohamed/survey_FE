@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toPlannerLanguageCode } from "@/lib/language";
+import { cn } from "@/lib/utils";
 
 import {
   useCreateSurvey,
@@ -33,6 +34,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -99,6 +101,7 @@ export default function ConfigPage() {
   const [currentStep, setCurrentStep] = useState<Step>("metadata");
   const [surveyId, setSurveyId] = useState<number | null>(null);
   const [showRephraseDialog, setShowRephraseDialog] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // AI Config State
   const [aiPrompt, setAiPrompt] = useState("");
@@ -116,6 +119,7 @@ export default function ConfigPage() {
    * The toggle only controls which backend we call on "Generate".
    */
   const [isPromptEnabled, setIsPromptEnabled] = useState(true);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
 
   // File upload state - stores the uploaded file and its text content
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
@@ -808,7 +812,7 @@ export default function ConfigPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F7FA] flex font-sans">
-      <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 pr-12 lg:pr-80">
+      <div className={cn("flex-1 flex flex-col min-w-0 transition-all duration-300", isSidebarOpen ? "pr-80" : "pr-12")}>
         
         {/* Top Navigation / Stepper */}
         <header className="bg-white border-b border-border sticky top-0 z-40">
@@ -965,55 +969,6 @@ export default function ConfigPage() {
                       )}
                     />
 
-                    {/* Attach File - File upload field */}
-                    <FormItem>
-                      <FormLabel className="text-lg font-semibold text-secondary flex items-center gap-2">
-                        <Paperclip className="w-5 h-5 text-primary" /> Attach File
-                      </FormLabel>
-                      <div className="space-y-3">
-                        {/* File input */}
-                        <div className="flex items-center gap-3">
-                          <label
-                            htmlFor="file-upload"
-                            className="flex items-center gap-2 px-4 py-2 border border-border rounded-md bg-white hover:bg-primary/5 hover:border-primary/50 cursor-pointer transition-colors text-sm font-medium"
-                          >
-                            <Paperclip className="w-4 h-4" />
-                            Choose File
-                          </label>
-                          <Input
-                            id="file-upload"
-                            type="file"
-                            onChange={handleFileChange}
-                            className="hidden"
-                            accept="*/*"
-                          />
-                          {attachedFile && (
-                            <div className="flex items-center gap-2 flex-1">
-                              <span className="text-sm text-muted-foreground flex items-center gap-2">
-                                <Paperclip className="w-4 h-4" />
-                                {attachedFile.name}
-                                <span className="text-xs text-muted-foreground">
-                                  ({(attachedFile.size / 1024).toFixed(2)} KB)
-                                </span>
-                              </span>
-                              <button
-                                type="button"
-                                onClick={handleRemoveFile}
-                                className="p-1 hover:bg-destructive/10 rounded-md transition-colors"
-                                aria-label="Remove file"
-                              >
-                                <X className="w-4 h-4 text-destructive" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        {/* Helper text */}
-                        <p className="text-sm text-muted-foreground">
-                          Upload a file to include its content with your survey. The file will be read as text and sent to the backend.
-                        </p>
-                      </div>
-                    </FormItem>
-
                     {/* Collection Mode */}
                     <FormField
                       control={form.control}
@@ -1142,11 +1097,38 @@ export default function ConfigPage() {
                             <Sparkles className={`w-5 h-5 text-primary/60 hover:text-primary transition-colors ${rephrasePrompt.isPending ? 'animate-pulse' : ''}`} />
                           </button>
                           <div style={{ pointerEvents: 'auto', zIndex: 10000 }}>
-                            <Switch
-                              checked={isPromptEnabled}
-                              onCheckedChange={setIsPromptEnabled}
-                              id="prompt-toggle"
-                            />
+                            <Tooltip 
+                              open={tooltipOpen} 
+                              onOpenChange={setTooltipOpen}
+                              delayDuration={200}
+                            >
+                              <TooltipTrigger 
+                                asChild
+                                onMouseEnter={() => setTooltipOpen(true)}
+                                onMouseLeave={() => {
+                                  setTimeout(() => setTooltipOpen(false), 1000);
+                                }}
+                              >
+                                <span className="inline-block">
+                                  <Switch
+                                    checked={isPromptEnabled}
+                                    onCheckedChange={setIsPromptEnabled}
+                                    id="prompt-toggle"
+                                  />
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent 
+                                side="top" 
+                                sideOffset={8}
+                                className="bg-secondary text-secondary-foreground border border-border shadow-lg z-[10001]"
+                                onMouseEnter={() => setTooltipOpen(true)}
+                                onMouseLeave={() => {
+                                  setTimeout(() => setTooltipOpen(false), 1000);
+                                }}
+                              >
+                                <p className="font-semibold text-sm">{isPromptEnabled ? "planner mode" : "fast mode"}</p>
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                           {/* Generate button - positioned in corner, vertically aligned */}
                           {/* This button calls the same handleGenerate function as the Generate button below */}
@@ -1176,6 +1158,55 @@ export default function ConfigPage() {
                           </button>
                         </div>
                       )}
+                    </div>
+                    
+                    {/* Attach File - File upload field */}
+                    <div className="space-y-2">
+                      <label className="text-lg font-semibold text-secondary flex items-center gap-2">
+                        <Paperclip className="w-5 h-5 text-primary" /> Attach File
+                      </label>
+                      <div className="space-y-3">
+                        {/* File input */}
+                        <div className="flex items-center gap-3">
+                          <label
+                            htmlFor="file-upload"
+                            className="flex items-center gap-2 px-4 py-2 border border-border rounded-md bg-white hover:bg-primary/5 hover:border-primary/50 cursor-pointer transition-colors text-sm font-medium"
+                          >
+                            <Paperclip className="w-4 h-4" />
+                            Choose File
+                          </label>
+                          <Input
+                            id="file-upload"
+                            type="file"
+                            onChange={handleFileChange}
+                            className="hidden"
+                            accept="*/*"
+                          />
+                          {attachedFile && (
+                            <div className="flex items-center gap-2 flex-1">
+                              <span className="text-sm text-muted-foreground flex items-center gap-2">
+                                <Paperclip className="w-4 h-4" />
+                                {attachedFile.name}
+                                <span className="text-xs text-muted-foreground">
+                                  ({(attachedFile.size / 1024).toFixed(2)} KB)
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={handleRemoveFile}
+                                className="p-1 hover:bg-destructive/10 rounded-md transition-colors"
+                                aria-label="Remove file"
+                              >
+                                <X className="w-4 h-4 text-destructive" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {/* Helper text */}
+                        <p className="text-sm text-muted-foreground">
+                          Upload a file to include its content with your survey. The file will be read as text and sent to the backend.
+                        </p>
+                      </div>
                     </div>
                   </div>
 
@@ -1221,7 +1252,7 @@ export default function ConfigPage() {
       </div>
 
       {/* Right Sidebar - History */}
-      <HistorySidebar />
+      <HistorySidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
 
       {/* Rephrase Dialog - Shows original vs rewritten prompt with notes */}
       <Dialog open={showRephraseDialog} onOpenChange={setShowRephraseDialog}>

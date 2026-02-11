@@ -25,6 +25,7 @@ import {
 } from "@/lib/plannerBackend";
 import { toPlannerLanguageCode } from "@/lib/language";
 import { PromptValidationError } from "@/lib/promptValidationError";
+import { RulesGenerationValidationError } from "@/lib/rulesGenerationError";
 
 // Export PromptValidationError for use in UI components
 export { PromptValidationError } from "@/lib/promptValidationError";
@@ -819,6 +820,11 @@ export function useGenerateSurveyRules() {
           throw error;
         }
         
+        // Preserve RulesGenerationValidationError - don't wrap it
+        if (error instanceof RulesGenerationValidationError) {
+          throw error;
+        }
+        
         // Provide detailed error messages for other errors
         let message = "An unknown error occurred";
         if (error instanceof TypeError && error.message.includes("fetch")) {
@@ -848,8 +854,15 @@ export function useGenerateSurveyRules() {
           description: error.message,
           variant: "destructive"
         });
+      } else if (error instanceof RulesGenerationValidationError) {
+        // Handle 422 validation error - show user-friendly message, don't log as console error
+        toast({
+          title: "Couldn't generate valid rules",
+          description: error.message || "Try rephrasing your request.",
+          variant: "destructive"
+        });
       } else {
-        // Handle other errors normally
+        // Handle other errors normally (including 500+ server errors which are already logged)
         const errorMessage = error instanceof Error ? error.message : "Failed to generate survey rules. Please try again.";
         toast({
           title: "Rules generation failed",

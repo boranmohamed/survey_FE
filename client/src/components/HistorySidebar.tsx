@@ -1,12 +1,14 @@
-import { useState } from "react";
 import { ChevronRight, Clock, MoreVertical, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { useSurveys } from "@/hooks/use-surveys";
 
-export function HistorySidebar() {
-  // Sidebar starts closed by default - only opens when user clicks the toggle button
-  const [isOpen, setIsOpen] = useState(false);
+interface HistorySidebarProps {
+  isOpen: boolean;
+  onToggle: () => void;
+}
+
+export function HistorySidebar({ isOpen, onToggle }: HistorySidebarProps) {
   const { data: surveys } = useSurveys();
 
   return (
@@ -18,7 +20,7 @@ export function HistorySidebar() {
     >
       {/* Toggle Button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={onToggle}
         className="absolute -left-3 top-20 bg-white border border-border rounded-full p-1 shadow-md hover:text-primary"
       >
         <ChevronRight className={cn("w-4 h-4 transition-transform", isOpen ? "rotate-0" : "rotate-180")} />

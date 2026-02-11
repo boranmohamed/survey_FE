@@ -5,8 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HistorySidebar } from "@/components/HistorySidebar";
 import { useGenerateSurveyRules, useGenerateQuestions, useUpdateSurvey, PromptValidationError } from "@/hooks/use-surveys";
+import { RulesGenerationValidationError } from "@/lib/rulesGenerationError";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * RulesPage - Page for generating survey rules
@@ -21,6 +23,7 @@ export default function RulesPage() {
   const [, setLocation] = useLocation();
   const surveyId = params?.id ? Number(params.id) : null;
   const { toast } = useToast();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // State for rule requirements input
   const [ruleRequirements, setRuleRequirements] = useState<string>("");
@@ -160,8 +163,12 @@ export default function RulesPage() {
         // The error toast is already shown by the hook's onError handler
         console.log("📝 Updated rule requirements with suggestion:", error.suggestedPrompt);
       }
+      // Don't log 422 validation errors as console errors - they're user-facing validation issues
+      if (!(error instanceof RulesGenerationValidationError)) {
+        // Only log real errors (500+, network errors, etc.)
+        console.error("Error generating rules:", error);
+      }
       // Error is handled by the hook's onError callback (toast notification)
-      console.error("Error generating rules:", error);
       // Clear rules on error
       setGeneratedRules(null);
     }
@@ -273,7 +280,7 @@ export default function RulesPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F7FA] flex font-sans">
-      <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 pr-12 lg:pr-80">
+      <div className={cn("flex-1 flex flex-col min-w-0 transition-all duration-300", isSidebarOpen ? "pr-80" : "pr-12")}>
         {/* Main Content */}
         <main className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">
           {/* Title */}
@@ -487,7 +494,7 @@ export default function RulesPage() {
       </div>
 
       {/* Right Sidebar - History */}
-      <HistorySidebar />
+      <HistorySidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
 
       {/* Fixed Generate Survey Button - Bottom Right Corner */}
       {/* Only show button when rules have been generated */}
