@@ -45,6 +45,8 @@ export default function BuilderPage() {
   const [localStructure, setLocalStructure] = useState<any>(null);
   // Ref to track previous structure to avoid unnecessary updates
   const prevStructureRef = useRef<string>("");
+  // Ref to track if we've manually updated the structure (to prevent overwriting)
+  const manualUpdateRef = useRef<boolean>(false);
   // State for edit input value
   const [editInputValue, setEditInputValue] = useState<string>("");
   // State to track if thread_id is available (for enabling/disabling edit feature)
@@ -91,6 +93,12 @@ export default function BuilderPage() {
   // Extract survey structure - check both API response and localStorage fallback
   // Use local structure if available, otherwise use survey structure
   useEffect(() => {
+    // Don't overwrite if we've manually updated the structure
+    if (manualUpdateRef.current) {
+      console.log("⏭️ Skipping structure sync - manual update in progress");
+      return;
+    }
+
     let structure = survey?.structure;
     if (!structure && surveyId) {
       // Fallback to localStorage for mock mode
@@ -108,6 +116,7 @@ export default function BuilderPage() {
     if (structure) {
       const structureStr = JSON.stringify(structure);
       if (structureStr !== prevStructureRef.current) {
+        console.log("🔄 Syncing structure from survey data");
         prevStructureRef.current = structureStr;
         setLocalStructure(structure);
       }
@@ -428,6 +437,13 @@ export default function BuilderPage() {
         update_instructions: editInputValue.trim(),
       });
 
+      console.log("✅ Update API response received:", {
+        renderedPagesCount: result.rendered_pages?.length || 0,
+        firstPageQuestionsCount: result.rendered_pages?.[0]?.questions?.length || 0,
+        firstQuestionHasOptions: !!result.rendered_pages?.[0]?.questions?.[0]?.options,
+        firstQuestionOptionsCount: result.rendered_pages?.[0]?.questions?.[0]?.options?.length || 0,
+      });
+
       // Convert rendered_pages to the structure format expected by the UI
       const updatedStructure = {
         sections: result.rendered_pages.map((page) => ({
@@ -445,6 +461,25 @@ export default function BuilderPage() {
         })),
       };
 
+      // Debug: Log the updated structure
+      const questionsWithOptions = updatedStructure.sections.flatMap(s => 
+        s.questions.filter(q => q.options && Array.isArray(q.options) && q.options.length > 0)
+      );
+      console.log("📊 Updated structure:", {
+        sectionsCount: updatedStructure.sections.length,
+        totalQuestions: updatedStructure.sections.reduce((sum, s) => sum + s.questions.length, 0),
+        questionsWithOptionsCount: questionsWithOptions.length,
+        sampleQuestion: questionsWithOptions[0] ? {
+          text: questionsWithOptions[0].text?.substring(0, 50),
+          type: questionsWithOptions[0].type,
+          optionsCount: questionsWithOptions[0].options?.length,
+          options: questionsWithOptions[0].options,
+        } : null,
+      });
+
+      // Mark that we're doing a manual update to prevent useEffect from overwriting
+      manualUpdateRef.current = true;
+
       // Update local structure immediately for responsive UI
       setLocalStructure(updatedStructure);
       prevStructureRef.current = JSON.stringify(updatedStructure);
@@ -461,6 +496,11 @@ export default function BuilderPage() {
       if (surveyId) {
         localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(updatedStructure));
       }
+
+      // Reset manual update flag after a short delay to allow API updates to complete
+      setTimeout(() => {
+        manualUpdateRef.current = false;
+      }, 1000);
 
       // Show success message
       toast({
@@ -582,12 +622,24 @@ export default function BuilderPage() {
                     <div className="space-y-4">
                       {section.questions.map((question, qIdx) => {
                         const currentQuestionNumber = questionNumber + qIdx;
+                        
+                        // Debug logging for questions with options
+                        if (['radio', 'checkbox_list', 'dropdown_list', 'select'].includes(question.type)) {
+                          console.log(`🔍 BuilderPage - Question ${currentQuestionNumber} (${question.type}):`, {
+                            text: question.text?.substring(0, 50),
+                            hasOptions: !!question.options,
+                            optionsType: Array.isArray(question.options) ? 'array' : typeof question.options,
+                            optionsLength: Array.isArray(question.options) ? question.options.length : 'N/A',
+                            options: question.options?.slice(0, 3),
+                          });
+                        }
+                        
                         return (
                           <QuestionCard
                             key={qIdx}
                             question={question.text}
                             type={question.type}
-                            options={question.options}
+                            options={question.options || []} // Ensure options is always an array
                             questionNumber={currentQuestionNumber}
                             // Pass metadata fields if available
                             spec_id={question.spec_id}

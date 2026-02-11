@@ -636,10 +636,13 @@ export function useRephrasePrompt() {
  * which sets the approval status to "approved", records the action in history,
  * and automatically generates questions using the Question Writer agent.
  * 
+ * @param options - Optional configuration
+ * @param options.showSuccessToast - Whether to show success toast (default: false, since navigation typically happens)
  * @returns Mutation hook that approves a plan and returns the approved plan with generated questions
  */
-export function useApproveSurveyPlan() {
+export function useApproveSurveyPlan(options?: { showSuccessToast?: boolean }) {
   const { toast } = useToast();
+  const showToast = options?.showSuccessToast ?? false;
 
   return useMutation({
     mutationFn: async (thread_id: string) => {
@@ -659,28 +662,36 @@ export function useApproveSurveyPlan() {
       }
     },
     onSuccess: (data) => {
-      // Count questions from generated_questions.rendered_pages (new format)
-      // or fallback to treating generated_questions as a record (old format)
-      let totalQuestions = 0;
-      if (data.generated_questions) {
-        if (data.generated_questions.rendered_pages && Array.isArray(data.generated_questions.rendered_pages)) {
-          // New format: generated_questions.rendered_pages
-          totalQuestions = data.generated_questions.rendered_pages.reduce((acc: number, page: any) => {
-            return acc + (Array.isArray(page.questions) ? page.questions.length : 0);
-          }, 0);
-        } else {
-          // Old format: generated_questions as a record
-          totalQuestions = Object.values(data.generated_questions).reduce((acc: number, page: any) => {
-            return acc + (Array.isArray(page.questions) ? page.questions.length : 0);
-          }, 0);
+      // Only show toast if explicitly requested (for cases where navigation doesn't happen)
+      if (showToast) {
+        // Count questions from generated_questions.rendered_pages (new format)
+        // or fallback to treating generated_questions as a record (old format)
+        let totalQuestions = 0;
+        if (data.generated_questions) {
+          if (data.generated_questions.rendered_pages && Array.isArray(data.generated_questions.rendered_pages)) {
+            // New format: generated_questions.rendered_pages
+            totalQuestions = data.generated_questions.rendered_pages.reduce((acc: number, page: any) => {
+              return acc + (Array.isArray(page.questions) ? page.questions.length : 0);
+            }, 0);
+          } else {
+            // Old format: generated_questions as a record
+            totalQuestions = Object.values(data.generated_questions).reduce((acc: number, page: any) => {
+              return acc + (Array.isArray(page.questions) ? page.questions.length : 0);
+            }, 0);
+          }
         }
+        
+        const message = data.status?.message || 
+          (totalQuestions > 0 
+            ? `Survey plan approved and ${totalQuestions} question${totalQuestions !== 1 ? 's' : ''} generated successfully`
+            : "Survey plan approved successfully");
+        
+        toast({
+          title: "Plan approved",
+          description: message,
+          variant: "default"
+        });
       }
-      
-      toast({
-        title: "Plan approved",
-        description: data.status?.message || `Survey plan approved and ${totalQuestions} questions generated successfully`,
-        variant: "default"
-      });
     },
     onError: (error) => {
       const errorMessage = error instanceof Error ? error.message : "Failed to approve survey plan. Please try again.";

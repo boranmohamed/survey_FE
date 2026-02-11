@@ -462,38 +462,19 @@ export default function ConfigPage() {
         // Update blueprint state with approved plan (includes generated_questions)
         setBlueprint(approvedPlan);
 
-        // Call generate-validate-fix endpoint after approval succeeds
-        // This endpoint returns the actual rendered questions with full text, options, validation, etc.
-        let generateResult: Awaited<ReturnType<typeof generateValidateFixQuestions>> | null = null;
-        try {
-          console.log("🔵 Calling generate-validate-fix endpoint...", threadId);
-          generateResult = await generateValidateFixQuestions(threadId, true);
-          console.log("✅ Generate-validate-fix completed:", generateResult);
-          
+        // The new API response structure already contains all the questions in generated_questions.rendered_pages
+        // So we can use that directly without waiting for generate-validate-fix
+        // Optionally call generate-validate-fix in the background (non-blocking)
+        generateValidateFixQuestions(threadId, true).then((generateResult) => {
+          console.log("✅ Generate-validate-fix completed (background):", generateResult);
           // Log validation results if available
           if (generateResult.validation) {
             console.log(`📊 Validation: ${generateResult.validation.passed ? 'PASSED' : 'FAILED'}, Issues: ${generateResult.validation.issue_count}`);
-            if (generateResult.validation.issues && generateResult.validation.issues.length > 0) {
-              console.log("⚠️ Validation issues:", generateResult.validation.issues);
-            }
           }
-          
-          // Log save status
-          if (generateResult.saved !== undefined) {
-            console.log(`💾 Questions saved to database: ${generateResult.saved}`);
-          }
-          
-          // Log total questions generated
-          const totalQuestions = generateResult.rendered_pages.reduce(
-            (sum, page) => sum + page.questions.length,
-            0
-          );
-          console.log(`📝 Total questions generated: ${totalQuestions} across ${generateResult.rendered_pages.length} pages`);
-        } catch (generateError) {
+        }).catch((generateError) => {
           // Log error but don't break the approval flow
-          console.warn("⚠️ Generate-validate-fix failed, but approval succeeded:", generateError);
-          // Continue with the flow even if generate-validate-fix fails
-        }
+          console.warn("⚠️ Generate-validate-fix failed (background):", generateError);
+        });
 
         // Transform to sections format for backward compatibility
         // Priority order:
@@ -518,7 +499,10 @@ export default function ConfigPage() {
                   questions: questions.map((q: any) => ({
                     text: q.question_text || q.text || q.intent || '',
                     type: q.question_type || q.type || 'text',
-                    options: (q.options && Array.isArray(q.options) && q.options.length > 0) ? q.options : undefined,
+                    // Always include options if they exist (even if empty array)
+                    // For question types that need options (radio, checkbox_list, dropdown_list), 
+                    // the array should be populated from the API response
+                    options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
                     required: q.required !== undefined ? q.required : undefined,
                     spec_id: q.spec_id || undefined,
                     scale: q.scale || undefined,
@@ -544,7 +528,8 @@ export default function ConfigPage() {
                   questions: questions.map((q: any) => ({
                     text: q.question_text || q.text || q.intent || '',
                     type: q.question_type || q.type || 'text',
-                    options: (q.options && Array.isArray(q.options) && q.options.length > 0) ? q.options : undefined,
+                    // Always include options if they exist (even if empty array)
+                    options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
                     required: q.required !== undefined ? q.required : undefined,
                     spec_id: q.spec_id || undefined,
                     scale: q.scale || undefined,
@@ -565,31 +550,26 @@ export default function ConfigPage() {
         };
         
         let transformedPlan;
-        if (generateResult?.rendered_pages) {
-          // Use rendered_pages: contains actual question_text, full options array, validation, skip_logic, etc.
-          transformedPlan = {
-            sections: generateResult.rendered_pages.map((page, idx) => ({
-              title: page.name || `Section ${idx + 1}`,
-              questions: page.questions.map((question) => ({
-                text: question.question_text, // Use actual rendered question text
-                type: question.question_type,
-                options: question.options && question.options.length > 0 ? question.options : undefined,
-                required: question.required,
-                // Include additional metadata fields: spec_id, scale, validation, skip_logic
-                spec_id: question.spec_id || undefined,
-                scale: question.scale || undefined,
-                validation: question.validation || undefined,
-                skip_logic: question.skip_logic || undefined,
-              })),
-            })),
-            suggestedName: approvedPlan.plan?.title || '',
-          };
-        } else if (approvedPlan.generated_questions) {
+        // Priority: Use generated_questions from approved plan first (new API structure already has all questions)
+        if (approvedPlan.generated_questions) {
           // Use generated_questions from approved plan (actual questions generated during approval)
           const converted = convertGeneratedQuestionsToSections(approvedPlan.generated_questions);
           if (converted) {
             transformedPlan = converted;
             console.log("✅ Using generated_questions from approved plan");
+            // Debug: Check if options are present
+            const questionsWithOptions = transformedPlan.sections.flatMap(s => 
+              s.questions.filter(q => q.options && q.options.length > 0)
+            );
+            console.log(`📊 Found ${questionsWithOptions.length} questions with options out of ${transformedPlan.sections.reduce((sum, s) => sum + s.questions.length, 0)} total questions`);
+            if (questionsWithOptions.length > 0) {
+              console.log("📋 Sample question with options:", {
+                text: questionsWithOptions[0].text?.substring(0, 50),
+                type: questionsWithOptions[0].type,
+                optionsCount: questionsWithOptions[0].options?.length,
+                options: questionsWithOptions[0].options?.slice(0, 3),
+              });
+            }
           } else {
             // Fallback to original plan structure
             // Handle both section_brief and question_specs formats
@@ -661,12 +641,29 @@ export default function ConfigPage() {
           };
         }
 
+        // Debug: Log the transformed plan before saving
+        const questionsWithOptions = transformedPlan.sections.flatMap(s => 
+          s.questions.filter(q => q.options && Array.isArray(q.options) && q.options.length > 0)
+        );
+        console.log("💾 About to save structure:", {
+          sectionsCount: transformedPlan.sections.length,
+          totalQuestions: transformedPlan.sections.reduce((sum, s) => sum + s.questions.length, 0),
+          questionsWithOptionsCount: questionsWithOptions.length,
+          sampleQuestion: questionsWithOptions[0] ? {
+            text: questionsWithOptions[0].text?.substring(0, 50),
+            type: questionsWithOptions[0].type,
+            optionsCount: questionsWithOptions[0].options?.length,
+            options: questionsWithOptions[0].options,
+          } : null,
+        });
+
         // Save to survey structure
         try {
           await updateSurvey.mutateAsync({ 
             id: surveyId, 
             structure: transformedPlan 
           });
+          console.log("✅ Survey structure saved successfully");
         } catch (updateError) {
           console.warn("Survey update failed, continuing in frontend-only mode:", updateError);
         }
@@ -674,6 +671,7 @@ export default function ConfigPage() {
         // Store structure in localStorage as fallback for mock mode
         try {
           localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(transformedPlan));
+          console.log("✅ Survey structure saved to localStorage");
           // Store thread_id for later use in BuilderPage
           if (threadId) {
             localStorage.setItem(`survey_${surveyId}_thread_id`, threadId);
