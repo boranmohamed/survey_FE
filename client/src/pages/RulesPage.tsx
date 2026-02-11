@@ -7,6 +7,7 @@ import { HistorySidebar } from "@/components/HistorySidebar";
 import { useGenerateSurveyRules, useGenerateQuestions, useUpdateSurvey, PromptValidationError } from "@/hooks/use-surveys";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 
 /**
  * RulesPage - Page for generating survey rules
@@ -21,6 +22,7 @@ export default function RulesPage() {
   const [, setLocation] = useLocation();
   const surveyId = params?.id ? Number(params.id) : null;
   const { toast } = useToast();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // State for rule requirements input
   const [ruleRequirements, setRuleRequirements] = useState<string>("");
@@ -273,7 +275,7 @@ export default function RulesPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F7FA] flex font-sans">
-      <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 pr-12 lg:pr-80">
+      <div className={cn("flex-1 flex flex-col min-w-0 transition-all duration-300", isSidebarOpen ? "pr-80" : "pr-12")}>
         {/* Main Content */}
         <main className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">
           {/* Title */}
@@ -487,7 +489,7 @@ export default function RulesPage() {
       </div>
 
       {/* Right Sidebar - History */}
-      <HistorySidebar />
+      <HistorySidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
 
       {/* Fixed Generate Survey Button - Bottom Right Corner */}
       {/* Only show button when rules have been generated */}

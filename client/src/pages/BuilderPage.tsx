@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 
 /**
  * BuilderPage - Visual editor for survey structure
@@ -38,6 +39,7 @@ export default function BuilderPage() {
   const [, setLocation] = useLocation();
   const surveyId = params?.id ? Number(params.id) : null;
   const { toast } = useToast();
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
   // State for delete confirmation dialog
   const [pageToDelete, setPageToDelete] = useState<number | null>(null);
@@ -478,7 +480,7 @@ export default function BuilderPage() {
 
   return (
     <div className="min-h-screen bg-[#F5F7FA] flex font-sans">
-      <div className="flex-1 flex flex-col min-w-0 transition-all duration-300 pr-12 lg:pr-80">
+      <div className={cn("flex-1 flex flex-col min-w-0 transition-all duration-300", isSidebarOpen ? "pr-80" : "pr-12")}>
         {/* Header */}
         <header className="bg-white border-b border-border sticky top-0 z-40">
           <div className="max-w-5xl mx-auto px-6 py-4">
@@ -673,7 +675,7 @@ export default function BuilderPage() {
       </div>
 
       {/* Right Sidebar - History */}
-      <HistorySidebar />
+      <HistorySidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen(!isSidebarOpen)} />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={pageToDelete !== null} onOpenChange={(open) => !open && setPageToDelete(null)}>
