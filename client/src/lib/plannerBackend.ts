@@ -270,6 +270,193 @@ export async function getSurveyPlan(
 }
 
 /**
+ * Convert new survey structure (with survey.pages[].controls[]) to rendered_pages format
+ * This handles the new API response structure from the approve endpoint
+ */
+function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
+  console.log("🔄 convertSurveyToRenderedPages called with:", {
+    hasSurvey: !!survey,
+    hasPages: !!survey?.pages,
+    pagesIsArray: Array.isArray(survey?.pages),
+    pagesCount: survey?.pages?.length || 0,
+  });
+  
+  if (!survey || !survey.pages || !Array.isArray(survey.pages)) {
+    console.warn("⚠️ convertSurveyToRenderedPages: Invalid survey structure", survey);
+    return [];
+  }
+
+  return survey.pages.map((page: any) => {
+    const controls = page.controls || [];
+    const questions = controls.map((control: any) => {
+      // Extract question text from label (can be object with language keys or string)
+      // Combine English and Arabic if both exist, otherwise use available language
+      const label = control.label || {};
+      let questionText: string;
+      if (typeof label === 'string') {
+        questionText = label;
+      } else {
+        const enText = label.en || '';
+        const arText = label.ar || '';
+        if (enText && arText) {
+          // Combine bilingual: "English / Arabic"
+          questionText = `${enText} / ${arText}`;
+        } else {
+          // Use whichever is available
+          questionText = enText || arText || Object.values(label)[0] || '';
+        }
+      }
+
+      // Extract options from settings.props.options (correct path based on API structure)
+      const options: string[] = [];
+      // Try both paths: settings.props.options (new structure) and props.options (legacy)
+      const optionsArray = control.settings?.props?.options || control.props?.options;
+      
+      if (optionsArray && Array.isArray(optionsArray) && optionsArray.length > 0) {
+        optionsArray.forEach((opt: any, idx: number) => {
+          try {
+            const optLabel = opt.label || {};
+            let optionText = '';
+            
+            if (typeof optLabel === 'string') {
+              optionText = optLabel;
+            } else if (optLabel && typeof optLabel === 'object') {
+              const enOpt = optLabel.en || '';
+              const arOpt = optLabel.ar || '';
+              if (enOpt && arOpt) {
+                // Combine bilingual: "English / Arabic"
+                optionText = `${enOpt} / ${arOpt}`;
+              } else {
+                // Use whichever is available (prefer English, then Arabic, then any other value)
+                optionText = enOpt || arOpt || (Object.values(optLabel).find((v: any) => v && typeof v === 'string') as string) || '';
+              }
+            }
+            
+            // Only add non-empty options
+            if (optionText.trim().length > 0) {
+              options.push(optionText);
+            } else {
+              console.warn(`⚠️ Empty option text for ${control.id} option ${idx}:`, opt);
+            }
+          } catch (error) {
+            console.error(`❌ Error extracting option ${idx} for ${control.id}:`, error, opt);
+          }
+        });
+        
+        // Debug logging for options extraction
+        if (options.length > 0) {
+          console.log(`✅ Extracted ${options.length}/${optionsArray.length} options for ${control.id} (${control.type}):`, options.slice(0, 3));
+        } else {
+          console.warn(`⚠️ No valid options extracted for ${control.id} (${control.type}) - had ${optionsArray.length} options:`, optionsArray);
+        }
+      } else if (['radio', 'checkbox_list', 'dropdown_list', 'select'].includes(control.type)) {
+        // Warn if question type requires options but none were found
+        console.warn(`⚠️ Question ${control.id} is type ${control.type} but has no options. Checked:`, {
+          hasSettingsPropsOptions: !!control.settings?.props?.options,
+          hasPropsOptions: !!control.props?.options,
+          settings: control.settings,
+          props: control.props,
+        });
+      }
+
+      // Extract scale information from settings.props.scale (correct path)
+      // Try both paths: settings.props.scale (new structure) and props.scale (legacy)
+      const scaleData = control.settings?.props?.scale || control.props?.scale;
+      const scale = scaleData ? {
+        min: scaleData.min,
+        max: scaleData.max,
+        labels: (() => {
+          const labels = scaleData.labels || {};
+          if (!labels || typeof labels === 'string') {
+            return labels;
+          }
+          // Convert language-keyed labels to combined bilingual strings
+          const result: any = {};
+          if (labels.min) {
+            if (typeof labels.min === 'string') {
+              result.min = labels.min;
+            } else {
+              const enMin = labels.min.en || '';
+              const arMin = labels.min.ar || '';
+              result.min = (enMin && arMin) ? `${enMin} / ${arMin}` : (enMin || arMin || Object.values(labels.min)[0] || '');
+            }
+          }
+          if (labels.max) {
+            if (typeof labels.max === 'string') {
+              result.max = labels.max;
+            } else {
+              const enMax = labels.max.en || '';
+              const arMax = labels.max.ar || '';
+              result.max = (enMax && arMax) ? `${enMax} / ${arMax}` : (enMax || arMax || Object.values(labels.max)[0] || '');
+            }
+          }
+          return result;
+        })()
+      } : undefined;
+
+      // Extract validation rules
+      const validation = control.settings?.validations ? {
+        required: control.settings.validations.required || false,
+        max_length: control.settings.validations.max_length,
+        min_length: control.settings.validations.min_length,
+        pattern: control.settings.validations.pattern,
+        ...control.settings.validations
+      } : undefined;
+
+      // Map question types: select -> dropdown_list (QuestionCard expects dropdown_list)
+      let questionType = control.type || 'text';
+      if (questionType === 'select') {
+        questionType = 'dropdown_list';
+      }
+
+      const questionData = {
+        spec_id: control.id || control.name || '',
+        question_type: questionType,
+        question_text: questionText,
+        required: control.settings?.validations?.required || false,
+        options: options, // Always include options array (even if empty)
+        scale: scale,
+        validation: validation,
+        skip_logic: control.skip_logic || undefined,
+      };
+      
+      // Debug logging for question data - especially for questions that should have options
+      if (['radio', 'checkbox_list', 'dropdown_list', 'select'].includes(questionType)) {
+        if (options.length > 0) {
+          console.log(`✅ Question ${control.id} (${questionType}) - ${options.length} options:`, {
+            text: questionText.substring(0, 50) + (questionText.length > 50 ? '...' : ''),
+            options: options,
+            fullQuestionData: questionData, // Log full question data for verification
+          });
+        } else {
+          console.error(`❌ Question ${control.id} (${questionType}) - NO OPTIONS!`, {
+            text: questionText.substring(0, 50),
+            controlProps: control.props,
+            hasPropsOptions: !!control.props?.options,
+            propsOptionsLength: control.props?.options?.length || 0,
+            propsOptions: control.props?.options,
+          });
+        }
+      }
+      
+      return questionData;
+    });
+
+    // Extract page title (prefer title, then name, then id)
+    // Can be object with language keys or string
+    const pageTitle = page.title || page.name || {};
+    const pageName = typeof pageTitle === 'string' 
+      ? pageTitle 
+      : (pageTitle.en || pageTitle.ar || page.id || `Page ${page.id || ''}`);
+
+    return {
+      name: pageName,
+      questions: questions,
+    };
+  });
+}
+
+/**
  * Approve a survey plan by calling the POST approve endpoint.
  * This sets the approval status to "approved", records the action in history,
  * and automatically generates questions using the Question Writer agent.
@@ -349,7 +536,108 @@ export async function approveSurveyPlan(
 
   const response = finalJson as any;
   
-  // Extract fields from either data object or root level
+  // Check for new structure: { timestamp: "...", survey: { id, pages: [...], meta: {...} } }
+  if (response.survey) {
+    console.log("✅ Detected new survey structure format");
+    const survey = response.survey;
+    const threadId = survey.id || survey.meta?.thread_id || thread_id;
+    const surveyVersion = survey.surveyVersion || survey.version || "1";
+    
+    // Log survey structure for debugging
+    console.log("📋 Survey structure:", {
+      id: survey.id,
+      pagesCount: survey.pages?.length || 0,
+      firstPageControlsCount: survey.pages?.[0]?.controls?.length || 0,
+      firstControlType: survey.pages?.[0]?.controls?.[0]?.type,
+      firstControlHasOptions: !!survey.pages?.[0]?.controls?.[0]?.props?.options,
+      firstControlOptionsCount: survey.pages?.[0]?.controls?.[0]?.props?.options?.length || 0,
+    });
+    
+    // Convert survey structure to rendered_pages format
+    const renderedPages = convertSurveyToRenderedPages(survey);
+    
+    // Verify rendered pages have options
+    console.log("📋 Rendered pages result:", {
+      pagesCount: renderedPages.length,
+      firstPageQuestionsCount: renderedPages[0]?.questions?.length || 0,
+      firstQuestionType: renderedPages[0]?.questions?.[0]?.question_type,
+      firstQuestionOptionsCount: renderedPages[0]?.questions?.[0]?.options?.length || 0,
+      firstQuestionOptions: renderedPages[0]?.questions?.[0]?.options?.slice(0, 3),
+    });
+    
+    // Extract title (can be object with language keys or string)
+    const titleObj = survey.title || {};
+    const title = typeof titleObj === 'string' 
+      ? titleObj 
+      : (titleObj.en || titleObj.ar || Object.values(titleObj)[0] || '');
+
+    // Create a plan structure from the survey
+    const plan = {
+      title: title,
+      type: survey.type || "survey",
+      language: survey.language || "en",
+      pages: survey.pages.map((page: any) => {
+        // Prefer title, then name, then id for page name
+        const pageTitle = page.title || page.name || {};
+        const pageName = typeof pageTitle === 'string' 
+          ? pageTitle 
+          : (pageTitle.en || pageTitle.ar || page.id || '');
+        return {
+          name: pageName,
+          question_specs: [], // Empty since we have rendered questions
+        };
+      }),
+    };
+
+    // Extract meta - can be at root level, nested in survey.meta, or both
+    // Merge root-level timestamp with survey.meta if both exist
+    const rootMeta = response.meta || (response.timestamp ? { timestamp: response.timestamp } : undefined);
+    const surveyMeta = survey.meta;
+    const mergedMeta = surveyMeta 
+      ? { ...surveyMeta, ...(rootMeta || {}) }
+      : rootMeta;
+
+    // Verify rendered pages have options before returning
+    const totalQuestions = renderedPages.reduce((sum, page) => sum + (page.questions?.length || 0), 0);
+    const questionsWithOptions = renderedPages.flatMap(page => 
+      (page.questions || []).filter(q => q.options && Array.isArray(q.options) && q.options.length > 0)
+    );
+    console.log("📊 Rendered pages summary:", {
+      totalPages: renderedPages.length,
+      totalQuestions: totalQuestions,
+      questionsWithOptions: questionsWithOptions.length,
+      sampleQuestionWithOptions: questionsWithOptions[0] ? {
+        spec_id: questionsWithOptions[0].spec_id,
+        type: questionsWithOptions[0].question_type,
+        optionsCount: questionsWithOptions[0].options?.length,
+        options: questionsWithOptions[0].options,
+      } : null,
+    });
+
+    // Return normalized response in the expected format
+    const normalizedResponse: SurveyPlanResponse = {
+      meta: mergedMeta,
+      status: { code: "success", message: "Plan approved successfully" },
+      thread_id: threadId,
+      plan: plan,
+      approval_status: "approved" as const,
+      attempt: 1, // Default attempt number
+      version: parseInt(surveyVersion) || 1,
+      generated_questions: {
+        rendered_pages: renderedPages,
+      },
+    };
+
+    console.log("✅ Normalized approve response (new structure) - generated_questions.rendered_pages:", {
+      pagesCount: normalizedResponse.generated_questions?.rendered_pages?.length || 0,
+      firstPageQuestionsCount: normalizedResponse.generated_questions?.rendered_pages?.[0]?.questions?.length || 0,
+      firstQuestionHasOptions: !!normalizedResponse.generated_questions?.rendered_pages?.[0]?.questions?.[0]?.options,
+      firstQuestionOptionsCount: normalizedResponse.generated_questions?.rendered_pages?.[0]?.questions?.[0]?.options?.length || 0,
+    });
+    return normalizedResponse;
+  }
+  
+  // Legacy structure handling (for backward compatibility)
   const data = response.data || response;
   
   // Extract thread_id
@@ -388,7 +676,7 @@ export async function approveSurveyPlan(
     generated_questions: data.generated_questions || response.generated_questions,
   };
 
-  console.log("✅ Normalized approve response:", JSON.stringify(normalizedResponse, null, 2));
+  console.log("✅ Normalized approve response (legacy structure):", JSON.stringify(normalizedResponse, null, 2));
   return normalizedResponse;
 }
 
@@ -984,7 +1272,85 @@ export async function generateSurveyRules(
 
   const response = finalJson as any;
 
-  // Extract data from either data object or root level
+  // Check for new structure: { timestamp: "...", survey: { id, rules: [...], meta: {...} } }
+  if (response.survey && response.survey.rules && Array.isArray(response.survey.rules)) {
+    console.log("✅ Detected new survey structure format in rules response");
+    const survey = response.survey;
+    const threadId = survey.id || survey.meta?.thread_id || thread_id;
+    const rulesArray = survey.rules;
+
+    // Convert new rule format to expected format
+    const convertedRules = rulesArray.map((rule: any) => {
+      // Extract rule type from actions in the "then" array
+      const ruleType = rule.if?.then?.[0]?.type || 'unknown';
+      
+      // Convert conditions from "when" array to expected format
+      const conditions = (rule.if?.when || []).map((cond: any) => ({
+        left_side: {
+          type: cond.leftOperand?.type || 'question',
+          question_id: cond.leftOperand?.value || '',
+          data_type: cond.leftOperand?.data_type,
+        },
+        operator: cond.operator || '',
+        right_side: {
+          type: cond.rightOperand?.type || 'value',
+          value: cond.rightOperand?.value || '',
+          data_type: cond.rightOperand?.data_type,
+        },
+      }));
+
+      // Convert actions from "then" array to expected format
+      const actions = (rule.if?.then || []).map((action: any) => {
+        // Handle target IDs - if it's an array, join them; otherwise use the single value
+        let actionElement = '';
+        if (action.target?.ids && Array.isArray(action.target.ids)) {
+          actionElement = action.target.ids.join(', ');
+        } else if (action.target?.ids) {
+          actionElement = action.target.ids;
+        } else if (action.target?.type) {
+          actionElement = action.target.type;
+        }
+
+        return {
+          type: action.type || '',
+          action_element: actionElement,
+          message_en: action.message?.en,
+          message_ar: action.message?.ar,
+          sequence: action.sequence,
+          action_answer: action.action_answer,
+        };
+      });
+
+      return {
+        meta_rule: {
+          rule_id: rule.id || '',
+          rule_type: ruleType,
+          description_en: rule.description?.en || '',
+          description_ar: rule.description?.ar || '',
+        },
+        conditions: conditions,
+        actions: actions,
+      };
+    });
+
+    // Return normalized response in expected format
+    const normalizedResponse = {
+      thread_id: threadId,
+      rules: {
+        survey_rules: convertedRules,
+      },
+      critique_summary: undefined, // New structure doesn't include critique_summary
+    };
+
+    console.log("✅ Normalized rules generation response (new structure):", {
+      thread_id: normalizedResponse.thread_id,
+      rulesCount: normalizedResponse.rules.survey_rules.length,
+      sampleRule: normalizedResponse.rules.survey_rules[0],
+    });
+    return normalizedResponse;
+  }
+
+  // Legacy structure handling (for backward compatibility)
   const data = response.data || response;
 
   // Validate required fields
@@ -1005,7 +1371,7 @@ export async function generateSurveyRules(
     critique_summary: data.critique_summary || response.critique_summary,
   };
 
-  console.log("✅ Normalized rules generation response:", JSON.stringify(normalizedResponse, null, 2));
+  console.log("✅ Normalized rules generation response (legacy structure):", JSON.stringify(normalizedResponse, null, 2));
   return normalizedResponse;
 }
 
@@ -1115,7 +1481,54 @@ export async function updateSurveyPlan(
 
   const response = finalJson as any;
   
-  // Extract data from either data object or root level
+  // Check for new structure: { timestamp: "...", survey: { id, pages: [...], meta: {...} } }
+  if (response.survey) {
+    console.log("✅ Detected new survey structure format in update response");
+    const survey = response.survey;
+    const threadId = survey.id || survey.meta?.thread_id || thread_id;
+    
+    // Convert survey structure to rendered_pages format (same as approve)
+    const renderedPages = convertSurveyToRenderedPages(survey);
+    
+    // Verify rendered pages have options
+    const totalQuestions = renderedPages.reduce((sum, page) => sum + (page.questions?.length || 0), 0);
+    const questionsWithOptions = renderedPages.flatMap(page => 
+      (page.questions || []).filter(q => q.options && Array.isArray(q.options) && q.options.length > 0)
+    );
+    console.log("📊 Update rendered pages summary:", {
+      totalPages: renderedPages.length,
+      totalQuestions: totalQuestions,
+      questionsWithOptions: questionsWithOptions.length,
+    });
+
+    // Extract meta - can be at root level, nested in survey.meta, or both
+    const rootMeta = response.meta || (response.timestamp ? { timestamp: response.timestamp } : undefined);
+    const surveyMeta = survey.meta;
+    const mergedMeta = surveyMeta 
+      ? { ...surveyMeta, ...(rootMeta || {}) }
+      : rootMeta;
+
+    // Return normalized response
+    const normalizedResponse = {
+      meta: mergedMeta,
+      status: response.status || { code: "success", message: "Survey updated successfully" },
+      thread_id: threadId,
+      rendered_pages: renderedPages,
+      error: null,
+      validation: undefined,
+      saved: undefined,
+    };
+
+    console.log("✅ Normalized update response (new structure):", {
+      pagesCount: normalizedResponse.rendered_pages.length,
+      firstPageQuestionsCount: normalizedResponse.rendered_pages[0]?.questions?.length || 0,
+      firstQuestionHasOptions: !!normalizedResponse.rendered_pages[0]?.questions?.[0]?.options,
+      firstQuestionOptionsCount: normalizedResponse.rendered_pages[0]?.questions?.[0]?.options?.length || 0,
+    });
+    return normalizedResponse;
+  }
+  
+  // Legacy structure handling (for backward compatibility)
   const data = response.data || response;
   
   // Extract thread_id
@@ -1143,7 +1556,7 @@ export async function updateSurveyPlan(
     saved: data.saved !== undefined ? data.saved : response.saved,
   };
 
-  console.log("✅ Normalized update response:", JSON.stringify(normalizedResponse, null, 2));
+  console.log("✅ Normalized update response (legacy structure):", JSON.stringify(normalizedResponse, null, 2));
   return normalizedResponse;
 }
 
