@@ -219,11 +219,12 @@ export async function registerRoutes(
 
   // === Prompt Rewrite Endpoint (New API) ===
   // This endpoint matches the FastAPI specification: POST /api/upsert-survey/prompt/rewrite
+  // Now uses external paraphrase API instead of OpenAI
   app.post("/api/upsert-survey/prompt/rewrite", async (req, res) => {
     console.log("📥 Received prompt rewrite request");
     try {
       // Extract and validate request body
-      const { prompt, language = "en", mode = "paraphrase", meta } = req.body;
+      const { prompt, language = "en", mode, style, meta } = req.body;
       
       // Validate required fields
       if (!prompt || typeof prompt !== "string" || prompt.trim().length === 0) {
@@ -243,78 +244,75 @@ export async function registerRoutes(
         });
       }
 
-      if (!openai) {
-        return res.status(503).json({
-          original_prompt: prompt,
-          rewritten_prompt: "",
-          rewrite_notes: [],
-          status: {
-            code: "error",
-            message: "OpenAI is not configured"
-          },
-          meta: {
-          run_id: meta?.run_id || randomUUID(),
-          timestamp: new Date().toISOString(),
-          trace_id: meta?.trace_id
-          }
-        });
-      }
+      // Get external API URL from environment variable or use default
+      const paraphraseApiUrl = process.env.PARAPHRASE_API_URL || "http://192.168.2.30:8008/api/paraphrase/rewrite";
 
       // Generate run_id and trace_id if not provided
       const runId = meta?.run_id || randomUUID();
       const traceId = meta?.trace_id || randomUUID();
       const timestamp = new Date().toISOString();
 
-      // Create system prompt for professional rewriting
-      const systemPrompt = `You are a professional editor specializing in survey design. 
-Your task is to rewrite the user's survey prompt to improve clarity, professionalism, and effectiveness while:
-- Preserving ALL constraints, numbers, and specific requirements
-- Maintaining the original intent and meaning
-- Improving grammar, structure, and clarity
-- Making it more professional and actionable
+      // Map request: mode -> style (for backward compatibility)
+      // If style is provided, use it; otherwise map mode to style or default to "clean"
+      const styleParam = style || (mode === "paraphrase" ? "clean" : "clean");
 
-Return JSON with this structure:
-{
-  "rewritten_prompt": "the improved version",
-  "rewrite_notes": ["note 1", "note 2", ...]
-}
+      // Prepare request body for external API
+      const externalApiRequest = {
+        prompt: prompt,
+        language: language,
+        style: styleParam
+      };
 
-The rewrite_notes should be a list of strings describing what improvements were made.`;
-
-      const userPrompt = `Language: ${language}\nMode: ${mode}\nOriginal Prompt: ${prompt}`;
-
-      // Call OpenAI API
-      const response = await openai.chat.completions.create({
-        model: "gpt-4.1-mini",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        response_format: { type: "json_object" }
+      // Call external paraphrase API
+      const externalResponse = await fetch(paraphraseApiUrl, {
+        method: "POST",
+        headers: {
+          "accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(externalApiRequest)
       });
 
-      const content = response.choices[0].message.content;
-      if (!content) {
-        throw new Error("No content generated from OpenAI");
+      if (!externalResponse.ok) {
+        // Try to get error message from response
+        let errorMessage = "External paraphrase API returned an error";
+        try {
+          const errorData = await externalResponse.json();
+          errorMessage = errorData.message || errorData.detail || errorMessage;
+        } catch {
+          errorMessage = externalResponse.statusText || errorMessage;
+        }
+
+        return res.status(externalResponse.status >= 400 && externalResponse.status < 500 ? externalResponse.status : 503).json({
+          original_prompt: prompt,
+          rewritten_prompt: "",
+          rewrite_notes: [],
+          status: {
+            code: "error",
+            message: errorMessage
+          },
+          meta: {
+            run_id: runId,
+            timestamp: timestamp,
+            trace_id: traceId
+          }
+        });
       }
 
-      // Parse the AI response
-      const aiResult = JSON.parse(content);
-      const rewrittenPrompt = aiResult.rewritten_prompt || prompt;
-      const rewriteNotes = Array.isArray(aiResult.rewrite_notes) 
-        ? aiResult.rewrite_notes 
-        : (aiResult.rewrite_notes ? [String(aiResult.rewrite_notes)] : []);
+      // Parse external API response
+      const externalData = await externalResponse.json();
 
-      // Extract token usage if available
-      const tokenUsage = response.usage ? {
-        input_tokens: response.usage.prompt_tokens,
-        output_tokens: response.usage.completion_tokens,
-        total_tokens: response.usage.total_tokens
-      } : undefined;
+      // Map external API response to expected format
+      // External API returns: { original, rewritten, style, language, used_fallback, validation_notes, rewrite_notes }
+      // Expected format: { original_prompt, rewritten_prompt, rewrite_notes, status, meta }
+      const rewrittenPrompt = externalData.rewritten || prompt;
+      const rewriteNotes = Array.isArray(externalData.rewrite_notes) 
+        ? externalData.rewrite_notes 
+        : (externalData.rewrite_notes ? [String(externalData.rewrite_notes)] : []);
 
       // Build response matching the API specification
       const responseData = {
-        original_prompt: prompt,
+        original_prompt: externalData.original || prompt,
         rewritten_prompt: rewrittenPrompt,
         rewrite_notes: rewriteNotes,
         status: {
@@ -324,14 +322,7 @@ The rewrite_notes should be a list of strings describing what improvements were 
         meta: {
           run_id: runId,
           timestamp: timestamp,
-          trace_id: traceId,
-          ...(response.model && {
-            model_info: {
-              name: response.model,
-              version: "1.0",
-              ...(tokenUsage && { token_usage: tokenUsage })
-            }
-          })
+          trace_id: traceId
         }
       };
 
@@ -351,7 +342,7 @@ The rewrite_notes should be a list of strings describing what improvements were 
           message: err instanceof Error ? err.message : "Failed to rewrite prompt. Please try again."
         },
         meta: {
-          run_id: req.body?.meta?.run_id || crypto.randomUUID(),
+          run_id: req.body?.meta?.run_id || randomUUID(),
           timestamp: new Date().toISOString(),
           trace_id: req.body?.meta?.trace_id
         }

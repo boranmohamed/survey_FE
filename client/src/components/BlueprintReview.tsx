@@ -4,6 +4,7 @@ import { Button } from "./ui/button";
 import { Check, Edit2, RotateCcw, Info, FileText, X, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Badge } from "./ui/badge";
+import { getText, getTextArray, getUserLanguagePreference } from "@/lib/bilingual";
 import {
   Accordion,
   AccordionContent,
@@ -69,6 +70,9 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
     const plannerPlan = plan;
     // Handle both normalized (plan.plan) and wrapped (plan.data.plan) response structures
     const planData = plannerPlan.plan || (plannerPlan as any).data?.plan;
+    
+    // Determine user language preference for bilingual text extraction
+    const userLang = getUserLanguagePreference(planData?.language || "en");
 
     // Safety check: ensure plan has pages
     if (!planData || !planData.pages || !Array.isArray(planData.pages) || planData.pages.length === 0) {
@@ -144,7 +148,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Title</p>
-                      <p className="text-base font-semibold">{planData.title}</p>
+                      <p className="text-base font-semibold">{getText(planData.title, userLang)}</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Type</p>
@@ -226,7 +230,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                           {/* Summary text */}
                           {planData.plan_rationale.summary && (
                             <p className="text-base leading-relaxed text-foreground">
-                              {planData.plan_rationale.summary}
+                              {getText(planData.plan_rationale.summary, userLang)}
                             </p>
                           )}
 
@@ -236,10 +240,26 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                             <div>
                               <h5 className="font-medium text-foreground mb-2 text-sm">Page and Count Reasoning</h5>
                               <ul className="space-y-2">
-                                {planData.plan_rationale.page_and_count_reasoning.map((reason: string, idx: number) => (
+                                {getTextArray(planData.plan_rationale.page_and_count_reasoning, userLang).map((reason: string, idx: number) => (
                                   <li key={idx} className="flex gap-2 text-foreground">
                                     <span className="text-primary mt-1">•</span>
                                     <span className="flex-1">{reason}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          
+                          {/* Question Style Guidance */}
+                          {planData.plan_rationale.question_style_guidance && 
+                           planData.plan_rationale.question_style_guidance.length > 0 && (
+                            <div>
+                              <h5 className="font-medium text-foreground mb-2 text-sm">Question Style Guidance</h5>
+                              <ul className="space-y-2">
+                                {getTextArray(planData.plan_rationale.question_style_guidance, userLang).map((guidance: string, idx: number) => (
+                                  <li key={idx} className="flex gap-2 text-foreground">
+                                    <span className="text-primary mt-1">•</span>
+                                    <span className="flex-1">{guidance}</span>
                                   </li>
                                 ))}
                               </ul>
@@ -254,19 +274,19 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                                 {planData.plan_rationale.contextual_insights.title && (
                                   <div>
                                     <p className="text-sm font-medium text-muted-foreground">Title:</p>
-                                    <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.title}</p>
+                                    <p className="text-base text-foreground">{getText(planData.plan_rationale.contextual_insights.title, userLang)}</p>
                                   </div>
                                 )}
                                 {planData.plan_rationale.contextual_insights.type && (
                                   <div>
                                     <p className="text-sm font-medium text-muted-foreground">Type:</p>
-                                    <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.type}</p>
+                                    <p className="text-base text-foreground">{getText(planData.plan_rationale.contextual_insights.type, userLang)}</p>
                                   </div>
                                 )}
                                 {planData.plan_rationale.contextual_insights.language && (
                                   <div>
                                     <p className="text-sm font-medium text-muted-foreground">Language:</p>
-                                    <p className="text-base text-foreground">{planData.plan_rationale.contextual_insights.language}</p>
+                                    <p className="text-base text-foreground">{getText(planData.plan_rationale.contextual_insights.language, userLang)}</p>
                                   </div>
                                 )}
                               </div>
@@ -325,7 +345,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <div>
                         <h4 className="font-semibold text-foreground mb-2">Assumptions</h4>
                         <ul className="space-y-2">
-                          {planData.plan_rationale.assumptions.map((assumption: string, idx: number) => (
+                          {getTextArray(planData.plan_rationale.assumptions, userLang).map((assumption: string, idx: number) => (
                             <li key={idx} className="flex gap-2 text-foreground">
                               <span className="text-primary mt-1">•</span>
                               <span className="flex-1">{assumption}</span>
@@ -409,7 +429,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
             >
               <div className="bg-gray-50 px-6 py-4 border-b border-border flex justify-between items-center">
                 <h3 className="font-bold text-lg text-secondary">
-                  Page {pageIdx + 1}: {page.name}
+                  Page {pageIdx + 1}: {getText(page.name, userLang)}
                 </h3>
                 <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground bg-white px-3 py-1 rounded-full border border-border">
                   {/* Show question count from section_brief or question_specs */}
@@ -427,7 +447,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                     {page.section_brief.summary && (
                       <div className="mb-4">
                         <p className="text-sm font-medium text-muted-foreground mb-1">Summary:</p>
-                        <p className="text-base text-foreground">{page.section_brief.summary}</p>
+                        <p className="text-base text-foreground">{getText(page.section_brief.summary, userLang)}</p>
                       </div>
                     )}
                     
@@ -435,7 +455,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <div className="mb-4">
                         <p className="text-sm font-medium text-muted-foreground mb-2">Topics:</p>
                         <div className="flex flex-wrap gap-2">
-                          {page.section_brief.topics.map((topic: string, topicIdx: number) => (
+                          {getTextArray(page.section_brief.topics, userLang).map((topic: string, topicIdx: number) => (
                             <Badge key={topicIdx} variant="outline" className="text-xs">
                               {topic}
                             </Badge>
@@ -448,7 +468,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <div className="mb-4">
                         <p className="text-sm font-medium text-muted-foreground mb-2">Guidance:</p>
                         <ul className="space-y-1">
-                          {page.section_brief.guidance.map((guideline: string, guideIdx: number) => (
+                          {getTextArray(page.section_brief.guidance, userLang).map((guideline: string, guideIdx: number) => (
                             <li key={guideIdx} className="flex gap-2 text-foreground text-sm">
                               <span className="text-primary mt-1">•</span>
                               <span className="flex-1">{guideline}</span>
@@ -462,7 +482,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <div className="mb-4">
                         <p className="text-sm font-medium text-muted-foreground mb-2">Must Include:</p>
                         <div className="flex flex-wrap gap-2">
-                          {page.section_brief.must_include.map((item: string, itemIdx: number) => (
+                          {getTextArray(page.section_brief.must_include, userLang).map((item: string, itemIdx: number) => (
                             <Badge key={itemIdx} variant="secondary" className="text-xs bg-green-100 text-green-800">
                               {item}
                             </Badge>
@@ -475,7 +495,7 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
                       <div>
                         <p className="text-sm font-medium text-muted-foreground mb-2">Avoid:</p>
                         <div className="flex flex-wrap gap-2">
-                          {page.section_brief.avoid.map((item: string, itemIdx: number) => (
+                          {getTextArray(page.section_brief.avoid, userLang).map((item: string, itemIdx: number) => (
                             <Badge key={itemIdx} variant="secondary" className="text-xs bg-red-100 text-red-800">
                               {item}
                             </Badge>

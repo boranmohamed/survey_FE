@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { getText, getTextArray, getUserLanguagePreference } from "@/lib/bilingual";
 
 /**
  * BuilderPage - Visual editor for survey structure
@@ -119,6 +120,9 @@ export default function BuilderPage() {
   // Use local structure if available, otherwise fallback to survey structure
   const structure = localStructure || survey?.structure;
   const sections = structure?.sections || [];
+
+  // Get user language preference from survey language
+  const userLang = getUserLanguagePreference(survey?.language || "English");
 
   // Calculate total questions across all sections
   const totalQuestions = sections.reduce((sum, section) => sum + section.questions.length, 0);
@@ -584,19 +588,31 @@ export default function BuilderPage() {
                     <div className="space-y-4">
                       {section.questions.map((question, qIdx) => {
                         const currentQuestionNumber = questionNumber + qIdx;
+                        // Extract text from bilingual object if needed
+                        const questionText = getText(question.text, userLang);
+                        // Extract options from bilingual array if needed
+                        const questionOptions = question.options ? getTextArray(question.options, userLang) : undefined;
+                        // Extract scale labels from bilingual objects if needed
+                        const questionScale = question.scale ? {
+                          ...question.scale,
+                          labels: question.scale.labels ? {
+                            min: question.scale.labels.min ? getText(question.scale.labels.min, userLang) : undefined,
+                            max: question.scale.labels.max ? getText(question.scale.labels.max, userLang) : undefined,
+                          } : undefined,
+                        } : undefined;
                         return (
                           <QuestionCard
                             key={qIdx}
-                            question={question.text}
+                            question={questionText}
                             type={question.type}
-                            options={question.options}
+                            options={questionOptions}
                             questionNumber={currentQuestionNumber}
                             // Pass metadata fields if available
                             spec_id={question.spec_id}
                             required={question.required}
                             validation={question.validation}
                             skip_logic={question.skip_logic}
-                            scale={question.scale}
+                            scale={questionScale}
                             // Pass delete handler if thread_id is available
                             onDelete={question.spec_id && hasThreadId ? () => handleDeleteQuestion(question.spec_id) : undefined}
                             isDeleting={deleteQuestion.isPending && deletingSpecId === question.spec_id}

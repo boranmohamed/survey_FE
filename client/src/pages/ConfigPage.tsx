@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toPlannerLanguageCode } from "@/lib/language";
 import { cn } from "@/lib/utils";
+import { getText, getUserLanguagePreference } from "@/lib/bilingual";
 
 import {
   useCreateSurvey,
@@ -343,6 +344,7 @@ export default function ConfigPage() {
           // Direct save and proceed
           // Transform planner response to sections format for backward compatibility
           // Handle both section_brief (new format) and question_specs (legacy format)
+          const userLang = getUserLanguagePreference(planResponse.plan.language || "en");
           const transformedPlan = {
             sections: planResponse.plan.pages.map((page, idx) => {
               // If page has section_brief, create placeholder questions based on the brief
@@ -352,7 +354,7 @@ export default function ConfigPage() {
                 // The actual questions will be generated later during approval
                 const questionCount = page.section_brief.question_count || 0;
                 return {
-                  title: page.name || `Section ${idx + 1}`,
+                  title: getText(page.name, userLang) || `Section ${idx + 1}`,
                   questions: Array.from({ length: questionCount }, (_, qIdx) => ({
                     text: `Question ${qIdx + 1} (to be generated)`,
                     type: 'text', // Default type, will be determined during generation
@@ -363,7 +365,7 @@ export default function ConfigPage() {
               } else if (page.question_specs && page.question_specs.length > 0) {
                 // Legacy format: use question_specs
                 return {
-                  title: page.name || `Section ${idx + 1}`,
+                  title: getText(page.name, userLang) || `Section ${idx + 1}`,
                   questions: page.question_specs.map((spec) => ({
                     text: spec.intent,
                     type: spec.question_type,
@@ -373,12 +375,12 @@ export default function ConfigPage() {
               } else {
                 // No section_brief or question_specs - create empty section
                 return {
-                  title: page.name || `Section ${idx + 1}`,
+                  title: getText(page.name, userLang) || `Section ${idx + 1}`,
                   questions: [],
                 };
               }
             }),
-            suggestedName: planResponse.plan.title,
+            suggestedName: getText(planResponse.plan.title, userLang),
           };
 
           try {
@@ -568,14 +570,14 @@ export default function ConfigPage() {
         
         // Helper to convert generated_questions to sections format
         // Backend returns: { generated_questions: { rendered_pages: [...] } }
-        const convertGeneratedQuestionsToSections = (generatedQuestions: any): { sections: any[], suggestedName: string } | null => {
+        const convertGeneratedQuestionsToSections = (generatedQuestions: any, userLang: "en" | "ar"): { sections: any[], suggestedName: string } | null => {
           if (!generatedQuestions || typeof generatedQuestions !== 'object') return null;
           
           try {
             // Check if generated_questions has rendered_pages array (new format)
             if (generatedQuestions.rendered_pages && Array.isArray(generatedQuestions.rendered_pages)) {
               const sections = generatedQuestions.rendered_pages.map((page: any, idx: number) => {
-                const pageName = page.name || page.title || `Section ${idx + 1}`;
+                const pageName = getText(page.name || page.title, userLang) || `Section ${idx + 1}`;
                 const questions = Array.isArray(page.questions) ? page.questions : [];
                 
                 return {
@@ -593,7 +595,7 @@ export default function ConfigPage() {
                 };
               });
               
-              return { sections, suggestedName: approvedPlan.plan?.title || '' };
+              return { sections, suggestedName: getText(approvedPlan.plan?.title, userLang) || '' };
             }
             
             // Fallback: try treating generated_questions as a record (old format)
@@ -601,7 +603,7 @@ export default function ConfigPage() {
             const pages = Object.values(generatedQuestions) as any[];
             if (Array.isArray(pages) && pages.length > 0 && pages[0]?.questions) {
               const sections = pages.map((page: any, idx: number) => {
-                const pageName = page.name || page.title || `Section ${idx + 1}`;
+                const pageName = getText(page.name || page.title, userLang) || `Section ${idx + 1}`;
                 const questions = Array.isArray(page.questions) ? page.questions : [];
                 
                 return {
@@ -619,7 +621,7 @@ export default function ConfigPage() {
                 };
               });
               
-              return { sections, suggestedName: approvedPlan.plan?.title || '' };
+              return { sections, suggestedName: getText(approvedPlan.plan?.title, userLang) || '' };
             }
             
             return null;
@@ -629,12 +631,13 @@ export default function ConfigPage() {
           }
         };
         
+        const userLang = getUserLanguagePreference(approvedPlan.plan?.language || "en");
         let transformedPlan;
         if (generateResult?.rendered_pages) {
           // Use rendered_pages: contains actual question_text, full options array, validation, skip_logic, etc.
           transformedPlan = {
             sections: generateResult.rendered_pages.map((page, idx) => ({
-              title: page.name || `Section ${idx + 1}`,
+              title: getText(page.name, userLang) || `Section ${idx + 1}`,
               questions: page.questions.map((question) => ({
                 text: question.question_text, // Use actual rendered question text
                 type: question.question_type,
@@ -647,11 +650,11 @@ export default function ConfigPage() {
                 skip_logic: question.skip_logic || undefined,
               })),
             })),
-            suggestedName: approvedPlan.plan?.title || '',
+            suggestedName: getText(approvedPlan.plan?.title, userLang) || '',
           };
         } else if (approvedPlan.generated_questions) {
           // Use generated_questions from approved plan (actual questions generated during approval)
-          const converted = convertGeneratedQuestionsToSections(approvedPlan.generated_questions);
+          const converted = convertGeneratedQuestionsToSections(approvedPlan.generated_questions, userLang);
           if (converted) {
             transformedPlan = converted;
             console.log("✅ Using generated_questions from approved plan");
@@ -664,7 +667,7 @@ export default function ConfigPage() {
                   // For section_brief format, create placeholder structure
                   const questionCount = page.section_brief.question_count || 0;
                   return {
-                    title: page.name || `Section ${idx + 1}`,
+                    title: getText(page.name, userLang) || `Section ${idx + 1}`,
                     questions: Array.from({ length: questionCount }, (_, qIdx) => ({
                       text: `Question ${qIdx + 1} (to be generated)`,
                       type: 'text',
@@ -673,7 +676,7 @@ export default function ConfigPage() {
                   };
                 } else if (page.question_specs && page.question_specs.length > 0) {
                   return {
-                    title: page.name || `Section ${idx + 1}`,
+                    title: getText(page.name, userLang) || `Section ${idx + 1}`,
                     questions: page.question_specs.map((spec) => ({
                       text: spec.intent,
                       type: spec.question_type,
@@ -682,12 +685,12 @@ export default function ConfigPage() {
                   };
                 } else {
                   return {
-                    title: page.name || `Section ${idx + 1}`,
+                    title: getText(page.name, userLang) || `Section ${idx + 1}`,
                     questions: [],
                   };
                 }
               }),
-              suggestedName: approvedPlan.plan?.title || '',
+              suggestedName: getText(approvedPlan.plan?.title, userLang) || '',
             };
           }
         } else {
@@ -699,7 +702,7 @@ export default function ConfigPage() {
                 // For section_brief format, create placeholder structure
                 const questionCount = page.section_brief.question_count || 0;
                 return {
-                  title: page.name || `Section ${idx + 1}`,
+                  title: getText(page.name, userLang) || `Section ${idx + 1}`,
                   questions: Array.from({ length: questionCount }, (_, qIdx) => ({
                     text: `Question ${qIdx + 1} (to be generated)`,
                     type: 'text',
@@ -708,7 +711,7 @@ export default function ConfigPage() {
                 };
               } else if (page.question_specs && page.question_specs.length > 0) {
                 return {
-                  title: page.name || `Section ${idx + 1}`,
+                  title: getText(page.name, userLang) || `Section ${idx + 1}`,
                   questions: page.question_specs.map((spec) => ({
                     text: spec.intent,
                     type: spec.question_type,
@@ -717,12 +720,12 @@ export default function ConfigPage() {
                 };
               } else {
                 return {
-                  title: page.name || `Section ${idx + 1}`,
+                  title: getText(page.name, userLang) || `Section ${idx + 1}`,
                   questions: [],
                 };
               }
             }),
-            suggestedName: approvedPlan.plan?.title || '',
+            suggestedName: getText(approvedPlan.plan?.title, userLang) || '',
           };
         }
 
