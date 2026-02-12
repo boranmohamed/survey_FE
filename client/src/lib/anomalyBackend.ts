@@ -1,6 +1,7 @@
 import { api, type GenerateSurveyResponse } from "@shared/routes";
 import { type GenerateSurveyRequest } from "@shared/schema";
 import { handlePromptValidationError } from "./promptValidationError";
+import { getText, getUserLanguagePreference } from "./bilingual";
 
 /**
  * Anomaly backend integration (Python/FastAPI).
@@ -158,6 +159,7 @@ function extractPlanCandidate(raw: unknown): unknown {
   }
   // Handle plan.pages format (planner API format with question_specs or section_brief)
   if (r.plan?.pages && Array.isArray(r.plan.pages)) {
+    const userLang = getUserLanguagePreference(r.plan.language || "en");
     return {
       sections: r.plan.pages.map((page: any, idx: number) => {
         // Check for section_brief first (new format)
@@ -165,7 +167,7 @@ function extractPlanCandidate(raw: unknown): unknown {
           // For section_brief format, create placeholder questions based on question_count
           const questionCount = page.section_brief.question_count || 0;
           return {
-            title: page.name || page.title || `Section ${idx + 1}`,
+            title: getText(page.name || page.title, userLang) || `Section ${idx + 1}`,
             questions: Array.from({ length: questionCount }, (_, qIdx: number) => ({
               text: `Question ${qIdx + 1} (to be generated from section brief)`,
               type: 'text', // Default type, will be determined during generation
@@ -176,7 +178,7 @@ function extractPlanCandidate(raw: unknown): unknown {
         } else if (page.question_specs && Array.isArray(page.question_specs) && page.question_specs.length > 0) {
           // Legacy format: use question_specs
           return {
-            title: page.name || page.title || `Section ${idx + 1}`,
+            title: getText(page.name || page.title, userLang) || `Section ${idx + 1}`,
             questions: page.question_specs.map((spec: any) => ({
               text: spec.intent || spec.question_text || spec.text || '',
               type: spec.question_type || spec.type || 'text',
@@ -191,12 +193,12 @@ function extractPlanCandidate(raw: unknown): unknown {
         } else {
           // No section_brief or question_specs - create empty section
           return {
-            title: page.name || page.title || `Section ${idx + 1}`,
+            title: getText(page.name || page.title, userLang) || `Section ${idx + 1}`,
             questions: [],
           };
         }
       }),
-      suggestedName: r.plan.title || r.suggestedName || r.name,
+      suggestedName: getText(r.plan.title, userLang) || r.suggestedName || r.name,
     };
   }
   if (r.plan?.sections && Array.isArray(r.plan.sections)) {

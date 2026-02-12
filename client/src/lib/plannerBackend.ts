@@ -7,6 +7,7 @@ import {
   type RenderedPage
 } from "@shared/routes";
 import { RulesGenerationValidationError } from "./rulesGenerationError";
+import { getText } from "./bilingual";
 
 /**
  * Planner backend integration (Python/FastAPI).
@@ -923,7 +924,7 @@ export async function generateSurveyRules(
               errorMessage = JSON.stringify(errorData.detail);
             }
           } else if (errorData?.status?.message) {
-            errorMessage = errorData.status.message;
+            errorMessage = getText(errorData.status.message, "en");
           }
         } catch {
           // Use default error message

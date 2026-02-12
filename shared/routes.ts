@@ -27,6 +27,16 @@ export const errorSchemas = {
  * metadata, approval status, and the complete plan structure.
  */
 
+// Bilingual text schema - supports both string (backward compatible) and bilingual object
+// When language is "en", fields are strings. When "ar" or "both", fields are bilingual objects.
+export const bilingualTextSchema = z.union([
+  z.string(),
+  z.object({
+    en: z.string(),
+    ar: z.string(),
+  }),
+]);
+
 // Question specification from planner API
 export const planQuestionSpecSchema = z.object({
   spec_id: z.string(),
@@ -41,17 +51,17 @@ export const planQuestionSpecSchema = z.object({
 // Used when planner provides high-level guidance instead of detailed question specs
 export const sectionBriefSchema = z.object({
   question_count: z.number().optional(), // Expected number of questions for this section
-  summary: z.string().optional(), // Brief summary of what this section should cover
-  topics: z.array(z.string()).optional(), // Topics to cover in this section
-  guidance: z.array(z.string()).optional(), // Guidance for question generation
-  must_include: z.array(z.string()).optional(), // Topics/questions that must be included
-  avoid: z.array(z.string()).optional(), // Topics/questions to avoid
+  summary: bilingualTextSchema.optional(), // Brief summary of what this section should cover (can be bilingual)
+  topics: z.array(bilingualTextSchema).optional(), // Topics to cover in this section (can be bilingual)
+  guidance: z.array(bilingualTextSchema).optional(), // Guidance for question generation (can be bilingual)
+  must_include: z.array(bilingualTextSchema).optional(), // Topics/questions that must be included (can be bilingual)
+  avoid: z.array(bilingualTextSchema).optional(), // Topics/questions to avoid (can be bilingual)
 });
 
 // Page structure from planner API
 // Supports both formats: question_specs (detailed) and section_brief (high-level guidance)
 export const planPageSchema = z.object({
-  name: z.string(),
+  name: bilingualTextSchema, // Page name (can be bilingual)
   question_specs: z.array(planQuestionSpecSchema).optional(), // Detailed question specifications (legacy format)
   section_brief: sectionBriefSchema.optional(), // High-level section guidance (new format)
 });
@@ -60,23 +70,27 @@ export const planPageSchema = z.object({
 // The summary field provides a brief explanation of the overall plan approach
 // Note: summary is optional to handle cases where older plans may not have it
 export const planRationaleSchema = z.object({
-  summary: z.string().optional(), // Brief explanation of overall plan approach
-  page_and_count_reasoning: z.array(z.string()).optional(), // Reasoning for page count decisions
-  question_type_reasoning: z.array(z.any()).optional(), // Reasoning for question type choices - can be string or { question_type: string; why: string }
-  assumptions: z.array(z.string()).optional(), // Assumptions made during planning
+  summary: bilingualTextSchema.optional(), // Brief explanation of overall plan approach (can be bilingual)
+  page_and_count_reasoning: z.array(bilingualTextSchema).optional(), // Reasoning for page count decisions (can be bilingual)
+  question_style_guidance: z.array(bilingualTextSchema).optional(), // Guidance for question style (can be bilingual)
+  assumptions: z.array(bilingualTextSchema).optional(), // Assumptions made during planning (can be bilingual)
   contextual_insights: z.object({
-    title: z.string().optional(), // Contextual insights about the survey title
-    type: z.string().optional(), // Contextual insights about the survey type
-    language: z.string().optional(), // Contextual insights about the survey language
+    title: bilingualTextSchema.optional(), // Contextual insights about the survey title (can be bilingual)
+    type: bilingualTextSchema.optional(), // Contextual insights about the survey type (can be bilingual)
+    language: bilingualTextSchema.optional(), // Contextual insights about the survey language (can be bilingual)
   }).optional(), // Additional contextual insights about the survey
+  question_type_reasoning: z.array(z.any()).optional(), // Reasoning for question type choices - can be string or { question_type: string; why: string }
 });
 
 // Plan structure from planner API
 export const planSchema = z.object({
-  title: z.string(),
+  title: bilingualTextSchema, // Survey title (can be bilingual)
   type: z.string(),
   language: z.string(),
-  conflict_resolution: z.string().optional(),
+  conflict_resolution: z.object({
+    resolved_title: bilingualTextSchema.optional(), // Resolved title after conflict resolution (can be bilingual)
+    resolution_summary: z.array(bilingualTextSchema).optional(), // Summary of resolution (can be bilingual)
+  }).optional(),
   pages: z.array(planPageSchema),
   estimated_question_count: z.number().optional(),
   version: z.number().optional(),
@@ -92,6 +106,18 @@ export const planSchema = z.object({
   distribution: z.record(z.any()).optional(),
   // Plan rationale - optional for backward compatibility with older plans
   plan_rationale: planRationaleSchema.nullable().optional(),
+  // Writer brief - optional guidance for question generation
+  writer_brief: z.object({
+    survey_goal: bilingualTextSchema.optional(),
+    target_audience: bilingualTextSchema.nullable().optional(),
+    structure_map: z.array(z.object({
+      section_name: bilingualTextSchema,
+      why_included: bilingualTextSchema,
+      related_pages: z.array(bilingualTextSchema),
+      guidance: z.array(bilingualTextSchema),
+    })).optional(),
+    global_rules: z.array(bilingualTextSchema).optional(),
+  }).optional(),
 });
 
 // Meta information from API response
@@ -105,7 +131,7 @@ export const metaSchema = z.object({
 // Status information from API response
 export const statusSchema = z.object({
   code: z.string(),
-  message: z.string(),
+  message: bilingualTextSchema.nullable(), // Status message (can be bilingual)
 });
 
 // Full planner API response
