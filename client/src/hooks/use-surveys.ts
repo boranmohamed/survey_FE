@@ -26,6 +26,7 @@ import {
 import { toPlannerLanguageCode } from "@/lib/language";
 import { PromptValidationError } from "@/lib/promptValidationError";
 import { RulesGenerationValidationError } from "@/lib/rulesGenerationError";
+import { getText } from "@/lib/bilingual";
 
 // Export PromptValidationError for use in UI components
 export { PromptValidationError } from "@/lib/promptValidationError";
@@ -682,14 +683,15 @@ export function useApproveSurveyPlan(options?: { showSuccessToast?: boolean }) {
           }
         }
         
-        const message = data.status?.message || 
-          (totalQuestions > 0 
+        const statusMessage = data.status?.message 
+          ? getText(data.status.message, "en")
+          : (totalQuestions > 0 
             ? `Survey plan approved and ${totalQuestions} question${totalQuestions !== 1 ? 's' : ''} generated successfully`
             : "Survey plan approved successfully");
         
         toast({
           title: "Plan approved",
-          description: message,
+          description: statusMessage,
           variant: "default"
         });
       }
@@ -743,9 +745,12 @@ export function useRejectSurveyPlan() {
       }
     },
     onSuccess: (data) => {
+      const statusMessage = data.status?.message 
+        ? getText(data.status.message, "en")
+        : "Survey plan rejected and regenerated successfully";
       toast({
         title: "Plan rejected",
-        description: data.status?.message || "Survey plan rejected and regenerated successfully",
+        description: statusMessage,
         variant: "default"
       });
     },
