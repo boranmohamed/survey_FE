@@ -819,16 +819,19 @@ export function useGenerateSurveyRules() {
     mutationFn: async ({ 
       thread_id, 
       user_prompt, 
-      expected_rules_count 
+      expected_rules_count,
+      mode
     }: { 
       thread_id: string; 
       user_prompt?: string; 
       expected_rules_count?: number;
+      mode?: string;
     }) => {
       try {
         return await generateSurveyRules(thread_id, {
           user_prompt,
           expected_rules_count,
+          mode,
         });
       } catch (error) {
         // Preserve PromptValidationError so UI components can access suggested_prompt

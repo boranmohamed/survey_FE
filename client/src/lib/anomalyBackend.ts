@@ -7,7 +7,7 @@ import { getText, getUserLanguagePreference } from "./bilingual";
  * Anomaly backend integration (Python/FastAPI).
  *
  * Why this file exists:
- * - We want the UI to be able to call an external backend (running on `192.168.2.131:8000`)
+ * - We want the UI to be able to call an external backend (running on `192.168.2.71:8000`)
  *   without mixing URL-building and response-shape guessing inside React components.
  * - We keep parsing/normalization here so the rest of the app can rely on the existing
  *   `GeneratedSurveyResponse` shape used by `BlueprintReview`.
@@ -15,15 +15,15 @@ import { getText, getUserLanguagePreference } from "./bilingual";
  * Configure the backend base URL:
  * - Set `VITE_ANOMALY_API_BASE_URL` in a `client/.env` file (Vite reads env vars from `client/`).
  * - Example values:
- *   - `VITE_ANOMALY_API_BASE_URL=http://192.168.2.131:8000/anomaly`
- *   - `VITE_ANOMALY_API_BASE_URL=http://192.168.2.131:8000`
+ *   - `VITE_ANOMALY_API_BASE_URL=http://192.168.2.71:8000/anomaly`
+ *   - `VITE_ANOMALY_API_BASE_URL=http://192.168.2.71:8000`
  */
 
 // Default backend URL - can be overridden with VITE_ANOMALY_API_BASE_URL environment variable
 // If your backend uses the /anomaly prefix, keep it. Otherwise, remove /anomaly
 // Default to localhost for the common case (backend running on the same machine).
 // We intentionally do NOT hardcode a specific LAN IP here because it changes per network/device.
-const DEFAULT_ANOMALY_API_BASE_URL = "http://192.168.2.131:8000";
+const DEFAULT_ANOMALY_API_BASE_URL = "http://192.168.2.71:8000";
 const SURVEY_PLAN_FAST_PATH = "/api/upsert-survey/survey-plan/fast";
 
 /**
@@ -59,7 +59,7 @@ function toggleAnomalyPrefix(baseUrl: string) {
   const trimmed = baseUrl.replace(/\/+$/, "");
   const anomalySuffix = "/anomaly";
   if (trimmed.toLowerCase().endsWith(anomalySuffix)) {
-    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.131:8000";
+    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.71:8000";
   }
   return `${trimmed}${anomalySuffix}`;
 }

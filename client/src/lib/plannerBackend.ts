@@ -20,12 +20,12 @@ import { getText } from "./bilingual";
  * Configure the backend base URL:
  * - Set `VITE_PLANNER_API_BASE_URL` in a `client/.env` file (Vite reads env vars from `client/`).
  * - Example values:
- *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.131:8000`
- *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.131:8000/anomaly`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.71:8000`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.71:8000/anomaly`
  */
 
 // Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
-const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.131:8000";
+const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.71:8000";
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -44,7 +44,7 @@ function toggleAnomalyPrefix(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   const anomalySuffix = "/anomaly";
   if (trimmed.toLowerCase().endsWith(anomalySuffix)) {
-    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.131:8000";
+    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.71:8000";
   }
   return `${trimmed}${anomalySuffix}`;
 }
@@ -1072,6 +1072,7 @@ export async function generateSurveyRules(
   options?: {
     user_prompt?: string;
     expected_rules_count?: number;
+    mode?: "ai_generate" | "custom" | "none" | string;
   }
 ): Promise<{
   thread_id: string;
@@ -1118,6 +1119,12 @@ export async function generateSurveyRules(
     };
     final_rules_count: number;
   };
+  survey_version?: string;
+  rules_survey_version?: string;
+  rules_source?: string;
+  is_stale?: boolean;
+  warnings?: string[];
+  invalid_spec_ids?: string[];
 }> {
   const baseUrl =
     (import.meta as any).env?.VITE_PLANNER_API_BASE_URL ?? DEFAULT_PLANNER_API_BASE_URL;
@@ -1150,6 +1157,9 @@ export async function generateSurveyRules(
   }
   if (options?.expected_rules_count !== undefined) {
     requestBody.expected_rules_count = options.expected_rules_count;
+  }
+  if (options?.mode !== undefined) {
+    requestBody.mode = options.mode;
   }
   
   console.log("📤 Final request body:", JSON.stringify(requestBody, null, 2));
@@ -1311,6 +1321,52 @@ export async function generateSurveyRules(
 
   const response = finalJson as any;
 
+  // Helper function to extract metadata from multiple possible locations
+  const extractMetadata = (response: any, survey?: any, data?: any) => {
+    const metadata: {
+      survey_version?: string;
+      rules_survey_version?: string;
+      rules_source?: string;
+      is_stale?: boolean;
+      warnings?: string[];
+      invalid_spec_ids?: string[];
+    } = {};
+
+    // Check multiple locations: survey.meta, data.meta, top-level meta, top-level fields
+    const metaSources = [
+      survey?.meta,
+      data?.meta,
+      response.meta,
+      response,
+      survey,
+      data,
+    ].filter(Boolean);
+
+    for (const source of metaSources) {
+      if (!source) continue;
+      if (source.survey_version !== undefined && metadata.survey_version === undefined) {
+        metadata.survey_version = source.survey_version;
+      }
+      if (source.rules_survey_version !== undefined && metadata.rules_survey_version === undefined) {
+        metadata.rules_survey_version = source.rules_survey_version;
+      }
+      if (source.rules_source !== undefined && metadata.rules_source === undefined) {
+        metadata.rules_source = source.rules_source;
+      }
+      if (source.is_stale !== undefined && metadata.is_stale === undefined) {
+        metadata.is_stale = source.is_stale;
+      }
+      if (source.warnings !== undefined && metadata.warnings === undefined) {
+        metadata.warnings = Array.isArray(source.warnings) ? source.warnings : [];
+      }
+      if (source.invalid_spec_ids !== undefined && metadata.invalid_spec_ids === undefined) {
+        metadata.invalid_spec_ids = Array.isArray(source.invalid_spec_ids) ? source.invalid_spec_ids : [];
+      }
+    }
+
+    return metadata;
+  };
+
   // Check for new structure: { timestamp: "...", survey: { id, rules: [...], meta: {...} } }
   if (response.survey && response.survey.rules && Array.isArray(response.survey.rules)) {
     console.log("✅ Detected new survey structure format in rules response");
@@ -1372,6 +1428,9 @@ export async function generateSurveyRules(
       };
     });
 
+    // Extract metadata from multiple possible locations
+    const metadata = extractMetadata(response, survey, undefined);
+
     // Return normalized response in expected format
     const normalizedResponse = {
       thread_id: threadId,
@@ -1379,12 +1438,14 @@ export async function generateSurveyRules(
         survey_rules: convertedRules,
       },
       critique_summary: undefined, // New structure doesn't include critique_summary
+      ...metadata,
     };
 
     console.log("✅ Normalized rules generation response (new structure):", {
       thread_id: normalizedResponse.thread_id,
       rulesCount: normalizedResponse.rules.survey_rules.length,
       sampleRule: normalizedResponse.rules.survey_rules[0],
+      metadata,
     });
     return normalizedResponse;
   }
@@ -1403,11 +1464,15 @@ export async function generateSurveyRules(
     throw new Error("Response does not contain rules");
   }
 
+  // Extract metadata from multiple possible locations
+  const metadata = extractMetadata(response, undefined, data);
+
   // Return normalized response
   const normalizedResponse = {
     thread_id: data.thread_id || response.thread_id || thread_id,
     rules: data.rules || response.rules,
     critique_summary: data.critique_summary || response.critique_summary,
+    ...metadata,
   };
 
   console.log("✅ Normalized rules generation response (legacy structure):", JSON.stringify(normalizedResponse, null, 2));
