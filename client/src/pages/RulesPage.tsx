@@ -146,9 +146,18 @@ export default function RulesPage() {
 
     try {
       // Call the API with user prompt and optional expected rules count
+      // Always send the trimmed prompt value - backend handles empty strings correctly
+      const trimmedPrompt = ruleRequirements.trim();
+      console.log("📤 Sending user_prompt:", {
+        original: ruleRequirements,
+        trimmed: trimmedPrompt,
+        length: trimmedPrompt.length,
+        willSend: trimmedPrompt || undefined
+      });
+      
       const response = await generateRules.mutateAsync({
         thread_id: threadId,
-        user_prompt: ruleRequirements.trim() || undefined,
+        user_prompt: trimmedPrompt || undefined, // Send undefined only if truly empty (after trim)
         // You can optionally set expected_rules_count here if needed
         // expected_rules_count: 8,
       });

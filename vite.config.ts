@@ -32,6 +32,8 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: "0.0.0.0", // Listen on all network interfaces to allow network access
+    port: 5000, // Match the Express server port
     fs: {
       strict: true,
       deny: ["**/.*"],

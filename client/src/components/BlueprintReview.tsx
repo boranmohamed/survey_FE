@@ -361,8 +361,8 @@ export function BlueprintReview({ plan, onApprove, onRetry, onReject, threadId, 
           </Accordion>
         )}
 
-        {/* Debug card: Show what data we have to help diagnose missing plan_rationale */}
-        {!planData.plan_rationale && (
+        {/* Debug card: Show what data we have to help diagnose missing plan_rationale - Only in development */}
+        {!planData.plan_rationale && process.env.NODE_ENV === 'development' && (
           // Debug card: Show what data we have to help diagnose missing plan_rationale
           <Card className="border-yellow-200 bg-yellow-50/50">
             <CardHeader>

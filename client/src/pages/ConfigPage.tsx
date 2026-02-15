@@ -526,122 +526,110 @@ export default function ConfigPage() {
         const approvedPlan = await approveSurveyPlan.mutateAsync(threadId);
         console.log("✅ Plan approved, received response:", approvedPlan);
 
-        // Update blueprint state with approved plan (includes generated_questions)
-        setBlueprint(approvedPlan);
+        // Navigate immediately after API returns 200 (success)
+        // This happens before data processing to provide instant feedback
+        setLocation(`/builder/${surveyId}`);
 
-        // The new API response structure already contains all the questions in generated_questions.rendered_pages
-        // So we can use that directly without waiting for generate-validate-fix
-        // Optionally call generate-validate-fix in the background (non-blocking)
-        generateValidateFixQuestions(threadId, true).then((generateResult) => {
-          console.log("✅ Generate-validate-fix completed (background):", generateResult);
-          // Log validation results if available
-          if (generateResult.validation) {
-            console.log(`📊 Validation: ${generateResult.validation.passed ? 'PASSED' : 'FAILED'}, Issues: ${generateResult.validation.issue_count}`);
-          }
-        }).catch((generateError) => {
-          // Log error but don't break the approval flow
-          console.warn("⚠️ Generate-validate-fix failed (background):", generateError);
-        });
-
-        // Transform to sections format for backward compatibility
-        // Priority order:
-        // 1. rendered_pages from generate-validate-fix (validated and fixed questions with full metadata)
-        // 2. generated_questions from approved plan (actual questions generated during approval)
-        // 3. Original plan structure (only has intent and options_hint)
-        
-        // Helper to convert generated_questions to sections format
-        // Backend returns: { generated_questions: { rendered_pages: [...] } }
-        const convertGeneratedQuestionsToSections = (generatedQuestions: any, userLang: "en" | "ar"): { sections: any[], suggestedName: string } | null => {
-          if (!generatedQuestions || typeof generatedQuestions !== 'object') return null;
-          
+        // Process and save data in the background (non-blocking)
+        // This ensures navigation happens immediately while data is saved
+        (async () => {
           try {
-            // Check if generated_questions has rendered_pages array (new format)
-            if (generatedQuestions.rendered_pages && Array.isArray(generatedQuestions.rendered_pages)) {
-              const sections = generatedQuestions.rendered_pages.map((page: any, idx: number) => {
-                const pageName = getText(page.name || page.title, userLang) || `Section ${idx + 1}`;
-                const questions = Array.isArray(page.questions) ? page.questions : [];
-                
-                return {
-                  title: pageName,
-                  questions: questions.map((q: any) => ({
-                    text: q.question_text || q.text || q.intent || '',
-                    type: q.question_type || q.type || 'text',
-                    // Always include options if they exist (even if empty array)
-                    // For question types that need options (radio, checkbox_list, dropdown_list), 
-                    // the array should be populated from the API response
-                    options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
-                    required: q.required !== undefined ? q.required : undefined,
-                    spec_id: q.spec_id || undefined,
-                    scale: q.scale || undefined,
-                    validation: q.validation || undefined,
-                    skip_logic: q.skip_logic || undefined,
-                  })),
-                };
-              });
-              
-              return { sections, suggestedName: getText(approvedPlan.plan?.title, userLang) || '' };
-            }
+            // Update blueprint state with approved plan (includes generated_questions)
+            setBlueprint(approvedPlan);
+
+            // The new API response structure already contains all the questions in generated_questions.rendered_pages
+            // So we can use that directly without waiting for generate-validate-fix
+            // Optionally call generate-validate-fix in the background (non-blocking)
+            generateValidateFixQuestions(threadId, true).then((generateResult) => {
+              console.log("✅ Generate-validate-fix completed (background):", generateResult);
+              // Log validation results if available
+              if (generateResult.validation) {
+                console.log(`📊 Validation: ${generateResult.validation.passed ? 'PASSED' : 'FAILED'}, Issues: ${generateResult.validation.issue_count}`);
+              }
+            }).catch((generateError) => {
+              // Log error but don't break the approval flow
+              console.warn("⚠️ Generate-validate-fix failed (background):", generateError);
+            });
+
+            // Transform to sections format for backward compatibility
+            // Priority order:
+            // 1. rendered_pages from generate-validate-fix (validated and fixed questions with full metadata)
+            // 2. generated_questions from approved plan (actual questions generated during approval)
+            // 3. Original plan structure (only has intent and options_hint)
             
-            // Fallback: try treating generated_questions as a record (old format)
-            // where keys are page IDs and values are page objects with questions
-            const pages = Object.values(generatedQuestions) as any[];
-            if (Array.isArray(pages) && pages.length > 0 && pages[0]?.questions) {
-              const sections = pages.map((page: any, idx: number) => {
-                const pageName = getText(page.name || page.title, userLang) || `Section ${idx + 1}`;
-                const questions = Array.isArray(page.questions) ? page.questions : [];
-                
-                return {
-                  title: pageName,
-                  questions: questions.map((q: any) => ({
-                    text: q.question_text || q.text || q.intent || '',
-                    type: q.question_type || q.type || 'text',
-                    // Always include options if they exist (even if empty array)
-                    options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
-                    required: q.required !== undefined ? q.required : undefined,
-                    spec_id: q.spec_id || undefined,
-                    scale: q.scale || undefined,
-                    validation: q.validation || undefined,
-                    skip_logic: q.skip_logic || undefined,
-                  })),
-                };
-              });
+            // Helper to convert generated_questions to sections format
+            // Backend returns: { generated_questions: { rendered_pages: [...] } }
+            const convertGeneratedQuestionsToSections = (generatedQuestions: any, userLang: "en" | "ar"): { sections: any[], suggestedName: string } | null => {
+              if (!generatedQuestions || typeof generatedQuestions !== 'object') return null;
               
-              return { sections, suggestedName: getText(approvedPlan.plan?.title, userLang) || '' };
-            }
+              try {
+                // Check if generated_questions has rendered_pages array (new format)
+                if (generatedQuestions.rendered_pages && Array.isArray(generatedQuestions.rendered_pages)) {
+                  const sections = generatedQuestions.rendered_pages.map((page: any, idx: number) => {
+                    const pageName = getText(page.name || page.title, userLang) || `Section ${idx + 1}`;
+                    const questions = Array.isArray(page.questions) ? page.questions : [];
+                    
+                    return {
+                      title: pageName,
+                      questions: questions.map((q: any) => ({
+                        text: q.question_text || q.text || q.intent || '',
+                        type: q.question_type || q.type || 'text',
+                        // Always include options if they exist (even if empty array)
+                        // For question types that need options (radio, checkbox_list, dropdown_list), 
+                        // the array should be populated from the API response
+                        options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
+                        required: q.required !== undefined ? q.required : undefined,
+                        spec_id: q.spec_id || undefined,
+                        scale: q.scale || undefined,
+                        validation: q.validation || undefined,
+                        skip_logic: q.skip_logic || undefined,
+                      })),
+                    };
+                  });
+                  
+                  return { sections, suggestedName: getText(approvedPlan.plan?.title, userLang) || '' };
+                }
+                
+                // Fallback: try treating generated_questions as a record (old format)
+                // where keys are page IDs and values are page objects with questions
+                const pages = Object.values(generatedQuestions) as any[];
+                if (Array.isArray(pages) && pages.length > 0 && pages[0]?.questions) {
+                  const sections = pages.map((page: any, idx: number) => {
+                    const pageName = getText(page.name || page.title, userLang) || `Section ${idx + 1}`;
+                    const questions = Array.isArray(page.questions) ? page.questions : [];
+                    
+                    return {
+                      title: pageName,
+                      questions: questions.map((q: any) => ({
+                        text: q.question_text || q.text || q.intent || '',
+                        type: q.question_type || q.type || 'text',
+                        // Always include options if they exist (even if empty array)
+                        options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
+                        required: q.required !== undefined ? q.required : undefined,
+                        spec_id: q.spec_id || undefined,
+                        scale: q.scale || undefined,
+                        validation: q.validation || undefined,
+                        skip_logic: q.skip_logic || undefined,
+                      })),
+                    };
+                  });
+                  
+                  return { sections, suggestedName: getText(approvedPlan.plan?.title, userLang) || '' };
+                }
+                
+                return null;
+              } catch (error) {
+                console.warn("Failed to convert generated_questions to sections:", error);
+                return null;
+              }
+            };
             
-            return null;
-          } catch (error) {
-            console.warn("Failed to convert generated_questions to sections:", error);
-            return null;
-          }
-        };
-        
-        const userLang = getUserLanguagePreference(approvedPlan.plan?.language || "en");
-        let transformedPlan;
-        // Priority order:
-        // 1. rendered_pages from generate-validate-fix (validated and fixed questions with full metadata)
-        // 2. generated_questions from approved plan (actual questions generated during approval)
-        // 3. Original plan structure (only has intent and options_hint)
-        if (generateResult?.rendered_pages) {
-          // Use rendered_pages: contains actual question_text, full options array, validation, skip_logic, etc.
-          transformedPlan = {
-            sections: generateResult.rendered_pages.map((page, idx) => ({
-              title: getText(page.name, userLang) || `Section ${idx + 1}`,
-              questions: page.questions.map((question) => ({
-                text: question.question_text, // Use actual rendered question text
-                type: question.question_type,
-                options: question.options && question.options.length > 0 ? question.options : undefined,
-                required: question.required,
-                // Include additional metadata fields: spec_id, scale, validation, skip_logic
-                spec_id: question.spec_id || undefined,
-                scale: question.scale || undefined,
-                validation: question.validation || undefined,
-                skip_logic: question.skip_logic || undefined,
-              })),
-            })),
-            suggestedName: getText(approvedPlan.plan?.title, userLang) || '',
-          };
-        } else if (approvedPlan.generated_questions) {
+            const userLang = getUserLanguagePreference(approvedPlan.plan?.language || "en");
+            let transformedPlan;
+            // Priority order:
+            // 1. generated_questions from approved plan (actual questions generated during approval)
+            // 2. Original plan structure (only has intent and options_hint)
+            if (approvedPlan.generated_questions) {
           // Use generated_questions from approved plan (actual questions generated during approval)
           const converted = convertGeneratedQuestionsToSections(approvedPlan.generated_questions, userLang);
           if (converted) {
@@ -770,8 +758,13 @@ export default function ConfigPage() {
           console.warn("Failed to save to localStorage:", e);
         }
 
-        // Navigate to builder
-        setLocation(`/builder/${surveyId}`);
+            // Navigation already happened above, so we just need to save the data
+            // This code runs in the background after navigation
+          } catch (backgroundError) {
+            console.error("❌ Error processing approved plan data:", backgroundError);
+            // Don't show error to user since they've already navigated
+          }
+        })();
       } catch (error) {
         // Error is handled by the hook's onError handler (toast notification)
         console.error("❌ Error approving plan:", error);

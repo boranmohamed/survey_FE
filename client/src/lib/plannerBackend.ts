@@ -7,6 +7,7 @@ import {
   type RenderedPage
 } from "@shared/routes";
 import { RulesGenerationValidationError } from "./rulesGenerationError";
+import { handlePromptValidationError, PromptValidationError } from "./promptValidationError";
 import { getText } from "./bilingual";
 
 /**
@@ -19,12 +20,12 @@ import { getText } from "./bilingual";
  * Configure the backend base URL:
  * - Set `VITE_PLANNER_API_BASE_URL` in a `client/.env` file (Vite reads env vars from `client/`).
  * - Example values:
- *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000`
- *   - `VITE_PLANNER_API_BASE_URL=http://127.0.0.1:8000/anomaly`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.131:8000`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.131:8000/anomaly`
  */
 
 // Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
-const DEFAULT_PLANNER_API_BASE_URL = "http://127.0.0.1:8000";
+const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.131:8000";
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -43,7 +44,7 @@ function toggleAnomalyPrefix(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   const anomalySuffix = "/anomaly";
   if (trimmed.toLowerCase().endsWith(anomalySuffix)) {
-    return trimmed.slice(0, -anomalySuffix.length) || "http://127.0.0.1:8000";
+    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.131:8000";
   }
   return `${trimmed}${anomalySuffix}`;
 }
@@ -1137,11 +1138,21 @@ export async function generateSurveyRules(
   // Build request body - only include fields that are provided
   const requestBody: any = {};
   if (options?.user_prompt !== undefined) {
+    // Include user_prompt even if it's an empty string - backend handles empty strings correctly
     requestBody.user_prompt = options.user_prompt;
+    console.log("📤 Building request body with user_prompt:", {
+      value: options.user_prompt,
+      type: typeof options.user_prompt,
+      length: typeof options.user_prompt === 'string' ? options.user_prompt.length : 'N/A'
+    });
+  } else {
+    console.log("ℹ️ user_prompt is undefined, omitting from request body");
   }
   if (options?.expected_rules_count !== undefined) {
     requestBody.expected_rules_count = options.expected_rules_count;
   }
+  
+  console.log("📤 Final request body:", JSON.stringify(requestBody, null, 2));
 
   const doPost = async (url: string) => {
     const res = await fetch(url, {
@@ -1167,30 +1178,58 @@ export async function generateSurveyRules(
       // Only retry on 404 (wrong URL). For other errors, fail fast.
       if (res.status === 404) continue;
 
-      // Handle 422 (validation error) separately - don't treat as console error
+      // Handle 422 (validation error) separately - check if it's a prompt validation error
       if (res.status === 422) {
-        // Parse JSON body to extract error details
-        let errorMessage = "Couldn't generate valid rules. Try rephrasing your request.";
+        // Parse the error response first
+        let errorData: any = null;
         try {
-          const errorData = text ? JSON.parse(text) : null;
-          if (errorData?.detail) {
-            // Handle both string and object detail formats
-            if (typeof errorData.detail === "string") {
-              errorMessage = errorData.detail;
-            } else if (typeof errorData.detail === "object") {
-              // Try to extract a user-friendly message
-              if (errorData.detail.message) {
-                errorMessage = errorData.detail.message;
-              } else {
-                errorMessage = "Couldn't generate valid rules. Try rephrasing your request.";
-              }
-            }
-          } else if (errorData?.message) {
-            errorMessage = errorData.message;
-          }
-        } catch {
-          // Use default error message if parsing fails
+          errorData = text ? JSON.parse(text) : null;
+          console.log("🔍 422 Error Response:", JSON.stringify(errorData, null, 2));
+        } catch (parseError) {
+          // If parsing fails, use default error
+          console.warn("⚠️ Failed to parse 422 error response:", text);
+          throw new RulesGenerationValidationError("Couldn't generate valid rules. Try rephrasing your request.");
         }
+
+        // First, try to handle as PromptValidationError (structured error with reason_code, message, suggested_prompt)
+        // handlePromptValidationError will throw PromptValidationError if it matches the structure
+        try {
+          handlePromptValidationError(res.status, text);
+          // If we get here, handlePromptValidationError didn't throw, so it's not a PromptValidationError
+          console.log("ℹ️ 422 error is not a PromptValidationError, using fallback handling");
+        } catch (promptError) {
+          // If handlePromptValidationError threw, it's a PromptValidationError - re-throw it
+          if (promptError instanceof PromptValidationError) {
+            console.log("✅ Detected PromptValidationError:", {
+              reasonCode: promptError.reasonCode,
+              message: promptError.message,
+              hasSuggestedPrompt: !!promptError.suggestedPrompt
+            });
+            throw promptError;
+          }
+          // If it's some other error from parsing, re-throw it
+          throw promptError;
+        }
+        
+        // If not a PromptValidationError, fall back to RulesGenerationValidationError
+        // Extract error message from the parsed error data
+        let errorMessage = "Couldn't generate valid rules. Try rephrasing your request.";
+        if (errorData?.detail) {
+          // Handle both string and object detail formats
+          if (typeof errorData.detail === "string") {
+            errorMessage = errorData.detail;
+          } else if (typeof errorData.detail === "object") {
+            // Try to extract a user-friendly message
+            if (errorData.detail.message) {
+              errorMessage = errorData.detail.message;
+            } else {
+              errorMessage = "Couldn't generate valid rules. Try rephrasing your request.";
+            }
+          }
+        } else if (errorData?.message) {
+          errorMessage = errorData.message;
+        }
+        console.log("ℹ️ Using RulesGenerationValidationError with message:", errorMessage);
         // Throw custom error that won't be logged as console error
         throw new RulesGenerationValidationError(errorMessage);
       }

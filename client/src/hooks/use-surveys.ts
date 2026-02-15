@@ -865,9 +865,13 @@ export function useGenerateSurveyRules() {
       // Check if this is a prompt validation error
       if (error instanceof PromptValidationError) {
         // Show the user-friendly validation message
+        // Note: The UI component will automatically update the input field with suggested_prompt if available
+        const description = error.suggestedPrompt 
+          ? `${error.message} A suggested prompt has been filled in for you.`
+          : error.message;
         toast({
           title: "Invalid prompt",
-          description: error.message,
+          description: description,
           variant: "destructive"
         });
       } else if (error instanceof RulesGenerationValidationError) {
