@@ -447,6 +447,24 @@ export default function ConfigPage() {
           throw new Error("The generated plan does not have the expected structure. Please try again.");
         }
 
+        // Extract thread_id from the plan response (stored by postSurveyPlanFast for fast mode)
+        // The Anomaly backend returns survey.id which is the thread_id
+        const fastModeThreadId = (plan as any).thread_id;
+        if (fastModeThreadId) {
+          console.log("✅ Extracted thread_id from fast mode response:", fastModeThreadId);
+          // Store thread_id for later use in BuilderPage (for delete/edit features)
+          if (currentSurveyId) {
+            try {
+              localStorage.setItem(`survey_${currentSurveyId}_thread_id`, fastModeThreadId);
+              console.log("✅ Stored thread_id in localStorage:", fastModeThreadId);
+            } catch (e) {
+              console.warn("Failed to save thread_id to localStorage:", e);
+            }
+          }
+        } else {
+          console.warn("⚠️ No thread_id found in fast mode response - delete/edit features will not be available");
+        }
+
         // Fast mode (toggle OFF): Always skip blueprint review and go directly to builder
         // Blueprint review is only available when toggle is ON (planner API mode)
         // Direct save and proceed to builder

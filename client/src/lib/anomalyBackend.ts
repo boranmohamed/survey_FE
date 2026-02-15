@@ -86,6 +86,104 @@ function extractPlanCandidate(raw: unknown): unknown {
     return r;
   }
   
+  // Handle new format: { timestamp, survey: { id, pages: [...] } }
+  // This is the format returned by the approve endpoint
+  if (r.survey && r.survey.pages && Array.isArray(r.survey.pages)) {
+    // Import the conversion function from plannerBackend
+    // We'll need to convert survey.pages to rendered_pages format, then to sections
+    const survey = r.survey;
+    // Convert survey.pages to sections format
+    return {
+      sections: survey.pages.map((page: any, idx: number) => {
+        const controls = page.controls || [];
+        const questions = controls.map((control: any) => {
+          // Extract question text from label
+          const label = control.label || {};
+          let questionText: string;
+          if (typeof label === 'string') {
+            questionText = label;
+          } else {
+            const enText = label.en || '';
+            const arText = label.ar || '';
+            if (enText && arText) {
+              // For bilingual, preserve as object
+              questionText = { en: enText, ar: arText } as any;
+            } else {
+              questionText = enText || arText || Object.values(label)[0] as string || '';
+            }
+          }
+          
+          // Extract options
+          const options: Array<string | { en: string; ar: string }> = [];
+          const optionsArray = control.settings?.props?.options || control.props?.options;
+          if (optionsArray && Array.isArray(optionsArray) && optionsArray.length > 0) {
+            optionsArray.forEach((opt: any) => {
+              const optLabel = opt.label || {};
+              if (typeof optLabel === 'string') {
+                options.push(optLabel);
+              } else {
+                const enOpt = optLabel.en || '';
+                const arOpt = optLabel.ar || '';
+                if (enOpt && arOpt) {
+                  options.push({ en: enOpt, ar: arOpt });
+                } else {
+                  options.push(enOpt || arOpt);
+                }
+              }
+            });
+          }
+          
+          // Extract scale
+          const scaleData = control.settings?.props?.scale || control.props?.scale;
+          const scale = scaleData ? {
+            min: scaleData.min,
+            max: scaleData.max,
+            labels: scaleData.labels ? {
+              min: typeof scaleData.labels.min === 'object' && scaleData.labels.min !== null
+                ? scaleData.labels.min
+                : scaleData.labels.min,
+              max: typeof scaleData.labels.max === 'object' && scaleData.labels.max !== null
+                ? scaleData.labels.max
+                : scaleData.labels.max,
+            } : undefined,
+          } : undefined;
+          
+          // Map question types
+          let questionType = control.type || 'text';
+          if (questionType === 'select') {
+            questionType = 'dropdown_list';
+          }
+          
+          // Convert null values to undefined for schema validation
+          const finalScale = (scale !== null && scale !== undefined) ? scale : undefined;
+          const finalValidation = (control.settings?.validations !== null && control.settings?.validations !== undefined) 
+            ? control.settings.validations 
+            : undefined;
+          const finalSkipLogic = (control.skip_logic !== null && control.skip_logic !== undefined) 
+            ? control.skip_logic 
+            : undefined;
+          
+          return {
+            text: questionText,
+            type: questionType,
+            options: options.length > 0 ? options : undefined,
+            required: control.settings?.validations?.required || false,
+            spec_id: control.id || control.name || '',
+            scale: finalScale,
+            validation: finalValidation,
+            skip_logic: finalSkipLogic,
+          };
+        });
+        
+        return {
+          title: typeof page.name === 'object' ? (page.name.en || page.name.ar || Object.values(page.name)[0]) : (page.name || page.title || `Page ${idx + 1}`),
+          questions: questions,
+        };
+      }),
+      suggestedName: typeof survey.title === 'object' ? (survey.title.en || survey.title.ar || Object.values(survey.title)[0]) : (survey.title || ''),
+    };
+  }
+  
   // Handle rendered_pages format from planner API (convert to sections)
   if (r.rendered_pages && Array.isArray(r.rendered_pages)) {
     return {
@@ -97,9 +195,9 @@ function extractPlanCandidate(raw: unknown): unknown {
           options: q.options && Array.isArray(q.options) && q.options.length > 0 ? q.options : undefined,
           required: q.required,
           spec_id: q.spec_id,
-          scale: q.scale,
-          validation: q.validation,
-          skip_logic: q.skip_logic,
+          scale: (q.scale !== null && q.scale !== undefined) ? q.scale : undefined, // Convert null to undefined
+          validation: (q.validation !== null && q.validation !== undefined) ? q.validation : undefined,
+          skip_logic: (q.skip_logic !== null && q.skip_logic !== undefined) ? q.skip_logic : undefined, // Convert null to undefined
         })),
       })),
       suggestedName: r.suggestedName || r.name,
@@ -120,9 +218,9 @@ function extractPlanCandidate(raw: unknown): unknown {
             options: (q.options && Array.isArray(q.options) && q.options.length > 0) ? q.options : undefined,
             required: q.required !== undefined ? q.required : undefined,
             spec_id: q.spec_id,
-            scale: q.scale || undefined,
-            validation: q.validation || undefined,
-            skip_logic: q.skip_logic || undefined,
+            scale: (q.scale !== null && q.scale !== undefined) ? q.scale : undefined,
+            validation: (q.validation !== null && q.validation !== undefined) ? q.validation : undefined,
+            skip_logic: (q.skip_logic !== null && q.skip_logic !== undefined) ? q.skip_logic : undefined,
           })),
         })),
         suggestedName: r.suggestedName || r.name || r.plan?.title,
@@ -140,9 +238,9 @@ function extractPlanCandidate(raw: unknown): unknown {
             options: (q.options && Array.isArray(q.options) && q.options.length > 0) ? q.options : undefined,
             required: q.required !== undefined ? q.required : undefined,
             spec_id: q.spec_id,
-            scale: q.scale || undefined,
-            validation: q.validation || undefined,
-            skip_logic: q.skip_logic || undefined,
+            scale: (q.scale !== null && q.scale !== undefined) ? q.scale : undefined,
+            validation: (q.validation !== null && q.validation !== undefined) ? q.validation : undefined,
+            skip_logic: (q.skip_logic !== null && q.skip_logic !== undefined) ? q.skip_logic : undefined,
           })),
         })),
         suggestedName: r.suggestedName || r.name,
@@ -185,9 +283,9 @@ function extractPlanCandidate(raw: unknown): unknown {
               options: (spec.options_hint && Array.isArray(spec.options_hint) && spec.options_hint.length > 0) ? spec.options_hint : undefined,
               required: spec.required !== undefined ? spec.required : undefined,
               spec_id: spec.spec_id,
-              validation: spec.validation || undefined,
-              skip_logic: spec.skip_logic || undefined,
-              scale: spec.scale || undefined,
+              validation: (spec.validation !== null && spec.validation !== undefined) ? spec.validation : undefined,
+              skip_logic: (spec.skip_logic !== null && spec.skip_logic !== undefined) ? spec.skip_logic : undefined,
+              scale: (spec.scale !== null && spec.scale !== undefined) ? spec.scale : undefined,
             })),
           };
         } else {
@@ -318,16 +416,45 @@ export async function postSurveyPlanFast(
     );
   }
 
+  // Extract thread_id from the response (for fast mode)
+  // The Anomaly backend returns: { timestamp, survey: { id: "thread_...", meta: { thread_id: "..." }, pages: [...] } }
+  let threadId: string | undefined = undefined;
+  if (finalJson && typeof finalJson === 'object') {
+    const response = finalJson as any;
+    // Try survey.id first (most common)
+    if (response.survey?.id) {
+      threadId = response.survey.id;
+    }
+    // Try survey.meta.thread_id as fallback
+    else if (response.survey?.meta?.thread_id) {
+      threadId = response.survey.meta.thread_id;
+    }
+    // Try thread_id at root level
+    else if (response.thread_id) {
+      threadId = response.thread_id;
+    }
+  }
+
   // Validate and normalize to the exact shape the UI already expects.
   const candidate = extractPlanCandidate(finalJson);
   
   // Debug logging to understand the response structure
   console.log("🔍 Backend response structure:", JSON.stringify(finalJson, null, 2));
   console.log("🔍 Extracted candidate:", JSON.stringify(candidate, null, 2));
+  if (threadId) {
+    console.log("🔍 Extracted thread_id from Anomaly backend:", threadId);
+  }
   
   try {
     const parsed = api.ai.generate.responses[200].parse(candidate);
     console.log("✅ Successfully parsed response:", parsed);
+    
+    // Store thread_id in the parsed response as a custom property (not part of schema but accessible)
+    // We'll access it via (parsed as any).thread_id in ConfigPage
+    if (threadId) {
+      (parsed as any).thread_id = threadId;
+    }
+    
     return parsed;
   } catch (parseError) {
     // If parsing fails, show a helpful hint for debugging.
