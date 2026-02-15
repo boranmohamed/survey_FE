@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { getText, getTextArray, getUserLanguagePreference } from "@/lib/bilingual";
+import { getText, getTextArray, getUserLanguagePreference, getBothLanguages, getBothLanguagesArray, shouldUseBilingual, isBilingualContent } from "@/lib/bilingual";
 
 /**
  * BuilderPage - Visual editor for survey structure
@@ -39,6 +39,9 @@ export default function BuilderPage() {
   const [, params] = useRoute("/builder/:id");
   const [, setLocation] = useLocation();
   const surveyId = params?.id ? Number(params.id) : null;
+  
+  // ALWAYS log when component renders - this will help verify console is working
+  console.log("🚀 BuilderPage rendered", { surveyId, timestamp: new Date().toISOString() });
   const { toast } = useToast();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
@@ -63,6 +66,20 @@ export default function BuilderPage() {
   const updateSurveyPlan = useUpdateSurveyPlan();
   const deleteQuestion = useDeleteQuestion();
   const deletePageMutation = useDeletePage();
+  
+  // Debug: Log survey data when it loads
+  useEffect(() => {
+    if (survey) {
+      console.log("🔍 Survey loaded in BuilderPage:", {
+        id: survey.id,
+        name: survey.name,
+        language: survey.language,
+        hasStructure: !!survey.structure,
+        structureType: typeof survey.structure,
+        structureSectionsCount: survey.structure?.sections?.length || 0,
+      });
+    }
+  }, [survey]);
 
   // Check if thread_id is available on mount and when surveyId changes
   useEffect(() => {
@@ -117,6 +134,17 @@ export default function BuilderPage() {
     // Only update local structure if it's different from the previous one
     // This prevents overwriting local changes with stale API data
     if (structure) {
+      // Debug: Log the structure format when loading
+      if (structure.sections && structure.sections[0]?.questions?.[0]) {
+        console.log("🔍 Structure loaded in BuilderPage:", {
+          firstQuestionText: structure.sections[0].questions[0].text,
+          firstQuestionTextType: typeof structure.sections[0].questions[0].text,
+          firstQuestionIsBilingual: typeof structure.sections[0].questions[0].text === 'object' && structure.sections[0].questions[0].text !== null && 'en' in structure.sections[0].questions[0].text,
+          firstOption: structure.sections[0].questions[0].options?.[0],
+          firstOptionType: typeof structure.sections[0].questions[0].options?.[0],
+          firstOptionIsBilingual: typeof structure.sections[0].questions[0].options?.[0] === 'object' && structure.sections[0].questions[0].options?.[0] !== null && 'en' in structure.sections[0].questions[0].options?.[0],
+        });
+      }
       const structureStr = JSON.stringify(structure);
       if (structureStr !== prevStructureRef.current) {
         console.log("🔄 Syncing structure from survey data");
@@ -132,6 +160,38 @@ export default function BuilderPage() {
 
   // Get user language preference from survey language
   const userLang = getUserLanguagePreference(survey?.language || "English");
+  
+  // Check if survey is bilingual - check both the language field AND the actual content
+  // This handles cases where survey language is "English" but content is actually bilingual
+  const surveyLanguageBilingual = shouldUseBilingual(survey?.language || "English");
+  // Also check if the content itself is bilingual (even if survey language says "English")
+  const firstQuestionText = sections.length > 0 && sections[0]?.questions?.[0]?.text;
+  const contentIsBilingual = firstQuestionText ? isBilingualContent(firstQuestionText) : false;
+  const isBilingual = surveyLanguageBilingual || contentIsBilingual;
+  
+  // Debug: Log bilingual detection
+  console.log("🔍 Bilingual detection:", {
+    surveyLanguage: survey?.language,
+    surveyLanguageBilingual,
+    firstQuestionText: typeof firstQuestionText === 'string' 
+      ? firstQuestionText.substring(0, 100)
+      : (typeof firstQuestionText === 'object' && firstQuestionText !== null && 'en' in firstQuestionText)
+        ? `${firstQuestionText.en} / ${firstQuestionText.ar}`.substring(0, 100)
+        : String(firstQuestionText || ''),
+    contentIsBilingual,
+    isBilingual,
+  });
+  
+  // Debug: Log survey language and bilingual status
+  if (survey) {
+    console.log("🔍 Survey language check:", {
+      surveyLanguage: survey.language,
+      isBilingual: isBilingual,
+      userLang: userLang,
+      hasStructure: !!structure,
+      sectionsCount: structure?.sections?.length || 0,
+    });
+  }
 
   // Calculate total questions across all sections
   const totalQuestions = sections.reduce((sum, section) => sum + section.questions.length, 0);
@@ -567,8 +627,8 @@ export default function BuilderPage() {
           </div>
         </header>
 
-        {/* Main Content */}
-        <main className="flex-1 p-6 md:p-10 max-w-5xl mx-auto w-full">
+        {/* Main Content - Wider for bilingual surveys */}
+        <main className={`flex-1 p-6 md:p-10 mx-auto w-full ${isBilingual ? 'max-w-7xl' : 'max-w-5xl'}`}>
           {isLoading ? (
             <div className="bg-white rounded-xl shadow-sm border border-border p-8 text-center">
               <p className="text-muted-foreground">Loading survey...</p>
@@ -629,16 +689,49 @@ export default function BuilderPage() {
                       {section.questions.map((question, qIdx) => {
                         const currentQuestionNumber = questionNumber + qIdx;
                         
-                        // Extract text from bilingual object if needed
-                        const questionText = getText(question.text, userLang);
-                        // Extract options from bilingual array if needed
-                        const questionOptions = question.options ? getTextArray(question.options, userLang) : undefined;
+                        // For bilingual surveys, extract both languages separately
+                        // For non-bilingual, use single language extraction
+                        // Debug: Log the question text format
+                        if (isBilingual && qIdx === 0 && sectionIdx === 0) {
+                          console.log("🔍 Debug bilingual question:", {
+                            rawText: question.text,
+                            textType: typeof question.text,
+                            isString: typeof question.text === 'string',
+                            isObject: typeof question.text === 'object',
+                            hasEn: typeof question.text === 'object' && question.text !== null && 'en' in question.text,
+                            hasAr: typeof question.text === 'object' && question.text !== null && 'ar' in question.text,
+                          });
+                        }
+                        const questionTextBilingual = isBilingual ? getBothLanguages(question.text) : null;
+                        const questionText = isBilingual ? null : getText(question.text, userLang);
+                        
+                        // Debug: Log the extracted bilingual text
+                        if (isBilingual && qIdx === 0 && sectionIdx === 0) {
+                          console.log("🔍 Extracted bilingual question:", questionTextBilingual);
+                        }
+                        
+                        // Extract options - bilingual or single language
+                        if (isBilingual && question.options && qIdx === 0 && sectionIdx === 0) {
+                          console.log("🔍 Debug bilingual options:", {
+                            rawOptions: question.options,
+                            firstOption: question.options[0],
+                            firstOptionType: typeof question.options[0],
+                          });
+                        }
+                        const questionOptionsBilingual = isBilingual && question.options ? getBothLanguagesArray(question.options) : null;
+                        const questionOptions = isBilingual ? null : (question.options ? getTextArray(question.options, userLang) : undefined);
+                        
+                        // Debug: Log the extracted bilingual options
+                        if (isBilingual && questionOptionsBilingual && qIdx === 0 && sectionIdx === 0) {
+                          console.log("🔍 Extracted bilingual options:", questionOptionsBilingual.slice(0, 2));
+                        }
+                        
                         // Extract scale labels from bilingual objects if needed
                         const questionScale = question.scale ? {
                           ...question.scale,
                           labels: question.scale.labels ? {
-                            min: question.scale.labels.min ? getText(question.scale.labels.min, userLang) : undefined,
-                            max: question.scale.labels.max ? getText(question.scale.labels.max, userLang) : undefined,
+                            min: question.scale.labels.min ? (isBilingual ? getBothLanguages(question.scale.labels.min) : getText(question.scale.labels.min, userLang)) : undefined,
+                            max: question.scale.labels.max ? (isBilingual ? getBothLanguages(question.scale.labels.max) : getText(question.scale.labels.max, userLang)) : undefined,
                           } : undefined,
                         } : undefined;
                         
@@ -653,12 +746,96 @@ export default function BuilderPage() {
                           });
                         }
                         
+                        // Ensure we always have bilingual data when survey is bilingual
+                        // Fallback to re-extracting if questionTextBilingual is null
+                        const finalQuestionBilingual = isBilingual ? (questionTextBilingual || getBothLanguages(question.text)) : null;
+                        const finalOptionsBilingual = isBilingual && question.options ? (questionOptionsBilingual || getBothLanguagesArray(question.options)) : [];
+                        
+                        // Debug: Log what we're passing to QuestionCard for first question
+                        if (qIdx === 0 && sectionIdx === 0) {
+                          console.log("🔍 Passing to QuestionCard:", {
+                            isBilingual: isBilingual,
+                            questionTextBilingual: finalQuestionBilingual,
+                            hasOptionsBilingual: finalOptionsBilingual.length > 0,
+                            firstOptionBilingual: finalOptionsBilingual[0],
+                            rawQuestionText: question.text,
+                            rawFirstOption: question.options?.[0],
+                            willShowSeparate: isBilingual && finalQuestionBilingual !== null,
+                          });
+                        }
+                        
+                        // For bilingual surveys, render two separate question cards side by side
+                        if (isBilingual && finalQuestionBilingual) {
+                          return (
+                            <div key={qIdx} className="grid grid-cols-1 lg:grid-cols-2 gap-6 w-full">
+                              {/* English Question Card */}
+                              <QuestionCard
+                                question={finalQuestionBilingual.en}
+                                questionBilingual={null}
+                                type={question.type}
+                                options={finalOptionsBilingual.map(opt => opt.en)}
+                                optionsBilingual={[]}
+                                isBilingual={false}
+                                questionNumber={currentQuestionNumber}
+                                spec_id={question.spec_id}
+                                required={question.required}
+                                validation={question.validation}
+                                skip_logic={question.skip_logic}
+                                scale={questionScale ? {
+                                  ...questionScale,
+                                  labels: questionScale.labels ? {
+                                    min: typeof questionScale.labels.min === 'object' && questionScale.labels.min !== null && 'en' in questionScale.labels.min
+                                      ? questionScale.labels.min.en
+                                      : questionScale.labels.min,
+                                    max: typeof questionScale.labels.max === 'object' && questionScale.labels.max !== null && 'en' in questionScale.labels.max
+                                      ? questionScale.labels.max.en
+                                      : questionScale.labels.max,
+                                  } : undefined,
+                                } : undefined}
+                                onDelete={question.spec_id && hasThreadId ? () => handleDeleteQuestion(question.spec_id) : undefined}
+                                isDeleting={deleteQuestion.isPending && deletingSpecId === question.spec_id}
+                              />
+                              {/* Arabic Question Card */}
+                              <QuestionCard
+                                question={finalQuestionBilingual.ar}
+                                questionBilingual={null}
+                                type={question.type}
+                                options={finalOptionsBilingual.map(opt => opt.ar)}
+                                optionsBilingual={[]}
+                                isBilingual={false}
+                                questionNumber={null} // Don't show number for Arabic version
+                                spec_id={question.spec_id}
+                                required={question.required}
+                                validation={question.validation}
+                                skip_logic={question.skip_logic}
+                                scale={questionScale ? {
+                                  ...questionScale,
+                                  labels: questionScale.labels ? {
+                                    min: typeof questionScale.labels.min === 'object' && questionScale.labels.min !== null && 'ar' in questionScale.labels.min
+                                      ? questionScale.labels.min.ar
+                                      : questionScale.labels.min,
+                                    max: typeof questionScale.labels.max === 'object' && questionScale.labels.max !== null && 'ar' in questionScale.labels.max
+                                      ? questionScale.labels.max.ar
+                                      : questionScale.labels.max,
+                                  } : undefined,
+                                } : undefined}
+                                onDelete={undefined} // Only show delete on English version
+                                isDeleting={false}
+                              />
+                            </div>
+                          );
+                        }
+                        
+                        // For non-bilingual surveys, render single question card
                         return (
                           <QuestionCard
                             key={qIdx}
                             question={questionText}
+                            questionBilingual={finalQuestionBilingual}
                             type={question.type}
                             options={questionOptions || []} // Ensure options is always an array
+                            optionsBilingual={finalOptionsBilingual}
+                            isBilingual={isBilingual}
                             questionNumber={currentQuestionNumber}
                             // Pass metadata fields if available
                             spec_id={question.spec_id}

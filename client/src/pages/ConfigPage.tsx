@@ -572,11 +572,11 @@ export default function ConfigPage() {
                     return {
                       title: pageName,
                       questions: questions.map((q: any) => ({
+                        // Preserve bilingual structure if it's an object, otherwise use as string
                         text: q.question_text || q.text || q.intent || '',
                         type: q.question_type || q.type || 'text',
                         // Always include options if they exist (even if empty array)
-                        // For question types that need options (radio, checkbox_list, dropdown_list), 
-                        // the array should be populated from the API response
+                        // Options can be strings or bilingual objects {en: "...", ar: "..."}
                         options: (q.options && Array.isArray(q.options)) ? q.options : undefined,
                         required: q.required !== undefined ? q.required : undefined,
                         spec_id: q.spec_id || undefined,
@@ -737,6 +737,16 @@ export default function ConfigPage() {
 
         // Save to survey structure
         try {
+          // Debug: Log the structure before saving to verify bilingual format
+          console.log("🔍 Structure before saving:", {
+            firstQuestionText: transformedPlan.sections[0]?.questions[0]?.text,
+            firstQuestionTextType: typeof transformedPlan.sections[0]?.questions[0]?.text,
+            firstQuestionIsBilingual: typeof transformedPlan.sections[0]?.questions[0]?.text === 'object' && transformedPlan.sections[0]?.questions[0]?.text !== null && 'en' in transformedPlan.sections[0]?.questions[0]?.text,
+            firstOption: transformedPlan.sections[0]?.questions[0]?.options?.[0],
+            firstOptionType: typeof transformedPlan.sections[0]?.questions[0]?.options?.[0],
+            firstOptionIsBilingual: typeof transformedPlan.sections[0]?.questions[0]?.options?.[0] === 'object' && transformedPlan.sections[0]?.questions[0]?.options?.[0] !== null && 'en' in transformedPlan.sections[0]?.questions[0]?.options?.[0],
+          });
+          
           await updateSurvey.mutateAsync({ 
             id: surveyId, 
             structure: transformedPlan 
@@ -750,6 +760,14 @@ export default function ConfigPage() {
         try {
           localStorage.setItem(`survey_${surveyId}_structure`, JSON.stringify(transformedPlan));
           console.log("✅ Survey structure saved to localStorage");
+          
+          // Debug: Verify what was saved
+          const savedStructure = JSON.parse(localStorage.getItem(`survey_${surveyId}_structure`) || '{}');
+          console.log("🔍 Structure after saving (from localStorage):", {
+            firstQuestionText: savedStructure.sections?.[0]?.questions?.[0]?.text,
+            firstQuestionTextType: typeof savedStructure.sections?.[0]?.questions?.[0]?.text,
+            firstQuestionIsBilingual: typeof savedStructure.sections?.[0]?.questions?.[0]?.text === 'object' && savedStructure.sections?.[0]?.questions?.[0]?.text !== null && 'en' in savedStructure.sections?.[0]?.questions?.[0]?.text,
+          });
           // Store thread_id for later use in BuilderPage
           if (threadId) {
             localStorage.setItem(`survey_${surveyId}_thread_id`, threadId);

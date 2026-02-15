@@ -291,25 +291,29 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
     const controls = page.controls || [];
     const questions = controls.map((control: any) => {
       // Extract question text from label (can be object with language keys or string)
-      // Combine English and Arabic if both exist, otherwise use available language
+      // Preserve bilingual structure as object {en: "...", ar: "..."} instead of combining
       const label = control.label || {};
-      let questionText: string;
+      let questionText: string | { en: string; ar: string };
       if (typeof label === 'string') {
         questionText = label;
       } else {
         const enText = label.en || '';
         const arText = label.ar || '';
         if (enText && arText) {
-          // Combine bilingual: "English / Arabic"
-          questionText = `${enText} / ${arText}`;
+          // Preserve bilingual structure as object
+          questionText = { en: enText, ar: arText };
+        } else if (enText || arText) {
+          // If only one language, use it as string (backward compatible)
+          questionText = enText || arText;
         } else {
-          // Use whichever is available
-          questionText = enText || arText || Object.values(label)[0] || '';
+          // Fallback to any available value
+          questionText = Object.values(label)[0] as string || '';
         }
       }
 
       // Extract options from settings.props.options (correct path based on API structure)
-      const options: string[] = [];
+      // Options can be strings or bilingual objects {en: "...", ar: "..."}
+      const options: Array<string | { en: string; ar: string }> = [];
       // Try both paths: settings.props.options (new structure) and props.options (legacy)
       const optionsArray = control.settings?.props?.options || control.props?.options;
       
@@ -317,7 +321,7 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
         optionsArray.forEach((opt: any, idx: number) => {
           try {
             const optLabel = opt.label || {};
-            let optionText = '';
+            let optionText: string | { en: string; ar: string } = '';
             
             if (typeof optLabel === 'string') {
               optionText = optLabel;
@@ -325,16 +329,20 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
               const enOpt = optLabel.en || '';
               const arOpt = optLabel.ar || '';
               if (enOpt && arOpt) {
-                // Combine bilingual: "English / Arabic"
-                optionText = `${enOpt} / ${arOpt}`;
+                // Preserve bilingual structure as object
+                optionText = { en: enOpt, ar: arOpt };
+              } else if (enOpt || arOpt) {
+                // If only one language, use it as string
+                optionText = enOpt || arOpt;
               } else {
-                // Use whichever is available (prefer English, then Arabic, then any other value)
-                optionText = enOpt || arOpt || (Object.values(optLabel).find((v: any) => v && typeof v === 'string') as string) || '';
+                // Fallback to any available value
+                optionText = (Object.values(optLabel).find((v: any) => v && typeof v === 'string') as string) || '';
               }
             }
             
             // Only add non-empty options
-            if (optionText.trim().length > 0) {
+            if ((typeof optionText === 'string' && optionText.trim().length > 0) || 
+                (typeof optionText === 'object' && (optionText.en || optionText.ar))) {
               options.push(optionText);
             } else {
               console.warn(`⚠️ Empty option text for ${control.id} option ${idx}:`, opt);
@@ -371,7 +379,7 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
           if (!labels || typeof labels === 'string') {
             return labels;
           }
-          // Convert language-keyed labels to combined bilingual strings
+          // Preserve bilingual structure as objects instead of combining
           const result: any = {};
           if (labels.min) {
             if (typeof labels.min === 'string') {
@@ -379,7 +387,13 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
             } else {
               const enMin = labels.min.en || '';
               const arMin = labels.min.ar || '';
-              result.min = (enMin && arMin) ? `${enMin} / ${arMin}` : (enMin || arMin || Object.values(labels.min)[0] || '');
+              if (enMin && arMin) {
+                // Preserve bilingual structure
+                result.min = { en: enMin, ar: arMin };
+              } else {
+                // If only one language, use as string
+                result.min = enMin || arMin || Object.values(labels.min)[0] || '';
+              }
             }
           }
           if (labels.max) {
@@ -388,7 +402,13 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
             } else {
               const enMax = labels.max.en || '';
               const arMax = labels.max.ar || '';
-              result.max = (enMax && arMax) ? `${enMax} / ${arMax}` : (enMax || arMax || Object.values(labels.max)[0] || '');
+              if (enMax && arMax) {
+                // Preserve bilingual structure
+                result.max = { en: enMax, ar: arMax };
+              } else {
+                // If only one language, use as string
+                result.max = enMax || arMax || Object.values(labels.max)[0] || '';
+              }
             }
           }
           return result;
@@ -413,25 +433,38 @@ function convertSurveyToRenderedPages(survey: any): RenderedPage[] {
       const questionData = {
         spec_id: control.id || control.name || '',
         question_type: questionType,
-        question_text: questionText,
+        question_text: questionText, // Can be string or {en: "...", ar: "..."}
         required: control.settings?.validations?.required || false,
-        options: options, // Always include options array (even if empty)
+        options: options, // Always include options array (even if empty) - can contain strings or {en: "...", ar: "..."}
         scale: scale,
         validation: validation,
         skip_logic: control.skip_logic || undefined,
       };
       
+      // Debug: Log bilingual structure preservation
+      if (typeof questionText === 'object' && questionText !== null && 'en' in questionText && 'ar' in questionText) {
+        console.log(`✅ Preserved bilingual question_text for ${control.id}:`, {
+          en: questionText.en.substring(0, 50),
+          ar: questionText.ar.substring(0, 50),
+        });
+      }
+      if (options.length > 0 && typeof options[0] === 'object' && options[0] !== null && 'en' in options[0]) {
+        console.log(`✅ Preserved bilingual options for ${control.id}:`, options.slice(0, 2));
+      }
+      
       // Debug logging for question data - especially for questions that should have options
       if (['radio', 'checkbox_list', 'dropdown_list', 'select'].includes(questionType)) {
         if (options.length > 0) {
+          const questionTextStr = typeof questionText === 'string' ? questionText : (questionText.en || questionText.ar || '');
           console.log(`✅ Question ${control.id} (${questionType}) - ${options.length} options:`, {
-            text: questionText.substring(0, 50) + (questionText.length > 50 ? '...' : ''),
+            text: questionTextStr.substring(0, 50) + (questionTextStr.length > 50 ? '...' : ''),
             options: options,
             fullQuestionData: questionData, // Log full question data for verification
           });
         } else {
+          const questionTextStr = typeof questionText === 'string' ? questionText : (questionText.en || questionText.ar || '');
           console.error(`❌ Question ${control.id} (${questionType}) - NO OPTIONS!`, {
-            text: questionText.substring(0, 50),
+            text: questionTextStr.substring(0, 50),
             controlProps: control.props,
             hasPropsOptions: !!control.props?.options,
             propsOptionsLength: control.props?.options?.length || 0,

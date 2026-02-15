@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { StarRating } from "./StarRating";
+import { getBothLanguages } from "@/lib/bilingual";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
@@ -44,17 +45,29 @@ type QuestionType =
 
 interface QuestionCardProps {
   /**
-   * Question text to display
+   * Question text to display (for non-bilingual surveys)
    */
-  question: string;
+  question?: string | null;
+  /**
+   * Bilingual question text (for bilingual surveys) - English and Arabic separately
+   */
+  questionBilingual?: { en: string; ar: string } | null;
+  /**
+   * Whether this is a bilingual survey
+   */
+  isBilingual?: boolean;
   /**
    * Question type: supports all API question types
    */
   type: QuestionType;
   /**
-   * Options for choice type questions (radio, checkbox_list, dropdown_list, rank)
+   * Options for choice type questions (radio, checkbox_list, dropdown_list, rank) - for non-bilingual
    */
   options?: string[];
+  /**
+   * Bilingual options (for bilingual surveys) - English and Arabic separately
+   */
+  optionsBilingual?: Array<{ en: string; ar: string }>;
   /**
    * Question number/index
    */
@@ -128,9 +141,12 @@ interface QuestionCardProps {
  * Use the showMetadata prop to control whether metadata is displayed (default: false).
  */
 export function QuestionCard({ 
-  question, 
+  question,
+  questionBilingual,
+  isBilingual = false,
   type, 
-  options = [], 
+  options = [],
+  optionsBilingual = [],
   questionNumber,
   spec_id,
   required,
@@ -165,6 +181,14 @@ export function QuestionCard({
   const scaleMin = scale?.min ?? 1;
   const scaleMax = scale?.max ?? 5;
   const scaleLabels = scale?.labels ?? {};
+  
+  // Handle bilingual scale labels - use getBothLanguages to handle both objects and combined strings
+  const scaleLabelMinBilingual = scaleLabels.min ? getBothLanguages(scaleLabels.min as any) : { en: String(scaleMin), ar: String(scaleMin) };
+  const scaleLabelMaxBilingual = scaleLabels.max ? getBothLanguages(scaleLabels.max as any) : { en: String(scaleMax), ar: String(scaleMax) };
+  const scaleLabelMin = scaleLabelMinBilingual.en;
+  const scaleLabelMax = scaleLabelMaxBilingual.en;
+  const scaleLabelMinAr = scaleLabelMinBilingual.ar;
+  const scaleLabelMaxAr = scaleLabelMaxBilingual.ar;
 
   // Get max length from validation
   const maxLength = validation?.max_length;
@@ -190,8 +214,24 @@ export function QuestionCard({
     }
   };
 
+  // Debug: Log what QuestionCard received
+  if (isBilingual && questionBilingual) {
+    console.log("🔍 QuestionCard rendering bilingual:", {
+      isBilingual,
+      hasQuestionBilingual: !!questionBilingual,
+      questionBilingualEn: questionBilingual.en?.substring(0, 50),
+      questionBilingualAr: questionBilingual.ar?.substring(0, 50),
+      hasOptionsBilingual: optionsBilingual.length > 0,
+      firstOptionBilingual: optionsBilingual[0],
+      willRenderSeparate: isBilingual && questionBilingual !== null,
+    });
+  }
+
+  // Check if this is an Arabic-only card (no question number means it's the Arabic version of a bilingual question)
+  const isArabicOnly = isBilingual === false && questionNumber === null && question && /[\u0600-\u06FF]/.test(question);
+  
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-border p-6 space-y-4">
+    <div className={`bg-white rounded-xl shadow-sm border border-border p-6 space-y-4 ${isArabicOnly ? 'border-r-4 border-r-green-500' : ''}`} dir={isArabicOnly ? 'rtl' : undefined}>
       {/* Question Text */}
       <div className="flex items-start gap-3">
         {questionNumber && (
@@ -199,10 +239,12 @@ export function QuestionCard({
             {questionNumber}
           </div>
         )}
-        <h3 className="text-lg font-semibold text-secondary flex-1">
-          {question}
-          {required && <span className="text-destructive ml-1">*</span>}
-        </h3>
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-secondary">
+            {question}
+            {required && <span className="text-destructive ml-1">*</span>}
+          </h3>
+        </div>
         {/* Delete button - only shown if onDelete callback is provided */}
         {onDelete && (
           <Button
@@ -235,9 +277,17 @@ export function QuestionCard({
               step={1}
               className="w-full"
             />
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>{scaleLabels.min || scaleMin}</span>
-              <span>{scaleLabels.max || scaleMax}</span>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>{scaleLabelMin}</span>
+                <span>{scaleLabelMax}</span>
+              </div>
+              {isBilingual && (scaleLabelMinAr || scaleLabelMaxAr) && (
+                <div className="flex justify-between text-sm text-muted-foreground" dir="rtl">
+                  <span>{scaleLabelMaxAr || scaleMax}</span>
+                  <span>{scaleLabelMinAr || scaleMin}</span>
+                </div>
+              )}
             </div>
             <div className="text-center text-sm font-medium">
               Selected: {scaleValue[0]}
@@ -246,22 +296,47 @@ export function QuestionCard({
         )}
 
         {/* Radio Question - Radio button group */}
-        {normalizedType === "radio" && options.length > 0 && (
-          <RadioGroup value={selectedChoice} onValueChange={setSelectedChoice}>
-            <div className="space-y-3">
-              {options.map((option, idx) => (
-                <div key={idx} className="flex items-center space-x-2">
-                  <RadioGroupItem value={option} id={`option-${idx}`} />
-                  <Label
-                    htmlFor={`option-${idx}`}
-                    className="text-base font-normal cursor-pointer"
-                  >
-                    {option}
-                  </Label>
-                </div>
-              ))}
-            </div>
-          </RadioGroup>
+        {normalizedType === "radio" && (
+          (isBilingual && optionsBilingual.length > 0 ? (
+            <RadioGroup value={selectedChoice} onValueChange={setSelectedChoice}>
+              <div className="space-y-3">
+                {optionsBilingual.map((option, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-center space-x-2">
+                      <RadioGroupItem value={option.en} id={`option-${idx}`} />
+                      <Label
+                        htmlFor={`option-${idx}`}
+                        className="text-base font-normal cursor-pointer"
+                      >
+                        {option.en}
+                      </Label>
+                    </div>
+                    <div className="flex items-center space-x-2 pl-6" dir="rtl">
+                      <Label className="text-base font-normal text-muted-foreground">
+                        {option.ar}
+                      </Label>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </RadioGroup>
+          ) : options.length > 0 ? (
+            <RadioGroup value={selectedChoice} onValueChange={setSelectedChoice}>
+              <div className="space-y-3">
+                {options.map((option, idx) => (
+                  <div key={idx} className="flex items-center space-x-2">
+                    <RadioGroupItem value={option} id={`option-${idx}`} />
+                    <Label
+                      htmlFor={`option-${idx}`}
+                      className="text-base font-normal cursor-pointer"
+                    >
+                      {option}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </RadioGroup>
+          ) : null)
         )}
 
         {/* Text Field - Single-line text input */}
@@ -297,56 +372,123 @@ export function QuestionCard({
 
         {/* Checkbox - Single checkbox (for agreement/consent) */}
         {normalizedType === "checkbox" && (
-          <div className="flex items-center space-x-2">
-            <Checkbox
-              id="checkbox-single"
-              checked={checkboxValue}
-              onCheckedChange={(checked) => setCheckboxValue(checked === true)}
-            />
-            <Label
-              htmlFor="checkbox-single"
-              className="text-base font-normal cursor-pointer"
-            >
-              {options[0] || "I agree"}
-            </Label>
-          </div>
+          (isBilingual && optionsBilingual.length > 0 ? (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="checkbox-single"
+                  checked={checkboxValue}
+                  onCheckedChange={(checked) => setCheckboxValue(checked === true)}
+                />
+                <Label
+                  htmlFor="checkbox-single"
+                  className="text-base font-normal cursor-pointer"
+                >
+                  {optionsBilingual[0].en}
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2 pl-6" dir="rtl">
+                <Label className="text-base font-normal text-muted-foreground">
+                  {optionsBilingual[0].ar}
+                </Label>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="checkbox-single"
+                checked={checkboxValue}
+                onCheckedChange={(checked) => setCheckboxValue(checked === true)}
+              />
+              <Label
+                htmlFor="checkbox-single"
+                className="text-base font-normal cursor-pointer"
+              >
+                {options[0] || "I agree"}
+              </Label>
+            </div>
+          ))
         )}
 
         {/* Checkbox List - Multiple checkboxes (multi-select) */}
-        {normalizedType === "checkbox_list" && options.length > 0 && (
-          <div className="space-y-3">
-            {options.map((option, idx) => (
-              <div key={idx} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`checkbox-${idx}`}
-                  checked={selectedCheckboxes.includes(option)}
-                  onCheckedChange={() => handleCheckboxToggle(option)}
-                />
-                <Label
-                  htmlFor={`checkbox-${idx}`}
-                  className="text-base font-normal cursor-pointer"
-                >
-                  {option}
-                </Label>
-              </div>
-            ))}
-          </div>
+        {normalizedType === "checkbox_list" && (
+          (isBilingual && optionsBilingual.length > 0 ? (
+            <div className="space-y-3">
+              {optionsBilingual.map((option, idx) => (
+                <div key={idx} className="space-y-1">
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`checkbox-${idx}`}
+                      checked={selectedCheckboxes.includes(option.en)}
+                      onCheckedChange={() => handleCheckboxToggle(option.en)}
+                    />
+                    <Label
+                      htmlFor={`checkbox-${idx}`}
+                      className="text-base font-normal cursor-pointer"
+                    >
+                      {option.en}
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2 pl-6" dir="rtl">
+                    <Label className="text-base font-normal text-muted-foreground">
+                      {option.ar}
+                    </Label>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : options.length > 0 ? (
+            <div className="space-y-3">
+              {options.map((option, idx) => (
+                <div key={idx} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`checkbox-${idx}`}
+                    checked={selectedCheckboxes.includes(option)}
+                    onCheckedChange={() => handleCheckboxToggle(option)}
+                  />
+                  <Label
+                    htmlFor={`checkbox-${idx}`}
+                    className="text-base font-normal cursor-pointer"
+                  >
+                    {option}
+                  </Label>
+                </div>
+              ))}
+            </div>
+          ) : null)
         )}
 
         {/* Dropdown List - Select dropdown */}
-        {normalizedType === "dropdown_list" && options.length > 0 && (
-          <Select value={selectedDropdown} onValueChange={setSelectedDropdown}>
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select an option..." />
-            </SelectTrigger>
-            <SelectContent>
-              {options.map((option, idx) => (
-                <SelectItem key={idx} value={option}>
-                  {option}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {normalizedType === "dropdown_list" && (
+          (isBilingual && optionsBilingual.length > 0 ? (
+            <div className="space-y-2">
+              <Select value={selectedDropdown} onValueChange={setSelectedDropdown}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select an option..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {optionsBilingual.map((option, idx) => (
+                    <SelectItem key={idx} value={option.en}>
+                      {option.en} / {option.ar}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : options.length > 0 ? (
+            <Select value={selectedDropdown} onValueChange={setSelectedDropdown}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select an option..." />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((option, idx) => (
+                  <SelectItem key={idx} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null)
         )}
 
         {/* Star Rating - Interactive star rating component */}
@@ -365,9 +507,9 @@ export function QuestionCard({
               {Array.from({ length: scaleMax - scaleMin + 1 }, (_, i) => {
                 const value = scaleMin + i;
                 const emoji = value === scaleMin 
-                  ? (scaleLabels.min || "😞")
+                  ? (scaleLabelMin || "😞")
                   : value === scaleMax
-                  ? (scaleLabels.max || "😊")
+                  ? (scaleLabelMax || "😊")
                   : "😐";
                 return (
                   <button
@@ -383,42 +525,85 @@ export function QuestionCard({
                 );
               })}
             </div>
-            <div className="flex justify-between text-sm text-muted-foreground">
-              <span>{scaleLabels.min || scaleMin}</span>
-              <span>{scaleLabels.max || scaleMax}</span>
+            <div className="space-y-1">
+              <div className="flex justify-between text-sm text-muted-foreground">
+                <span>{scaleLabelMin}</span>
+                <span>{scaleLabelMax}</span>
+              </div>
+              {isBilingual && (scaleLabelMinAr || scaleLabelMaxAr) && (
+                <div className="flex justify-between text-sm text-muted-foreground" dir="rtl">
+                  <span>{scaleLabelMaxAr || scaleMax}</span>
+                  <span>{scaleLabelMinAr || scaleMin}</span>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {/* Rank Question - Simple ranking interface */}
-        {normalizedType === "rank" && options.length > 0 && (
-          <div className="space-y-3">
-            <div className="space-y-2">
-              {options.map((option, idx) => (
-                <div key={idx} className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleRankItem(option)}
-                    className={`px-4 py-2 rounded-md border transition-colors ${
-                      rankedItems.includes(option)
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-background border-border hover:bg-accent"
-                    }`}
-                  >
-                    {rankedItems.indexOf(option) !== -1
-                      ? `Rank ${rankedItems.indexOf(option) + 1}`
-                      : "Select"}
-                  </button>
-                  <span className="flex-1">{option}</span>
-                </div>
-              ))}
-            </div>
-            {rankedItems.length > 0 && (
-              <div className="text-sm text-muted-foreground">
-                Ranked: {rankedItems.join(" → ")}
+        {normalizedType === "rank" && (
+          (isBilingual && optionsBilingual.length > 0 ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                {optionsBilingual.map((option, idx) => (
+                  <div key={idx} className="space-y-1">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleRankItem(option.en)}
+                        className={`px-4 py-2 rounded-md border transition-colors ${
+                          rankedItems.includes(option.en)
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background border-border hover:bg-accent"
+                        }`}
+                      >
+                        {rankedItems.indexOf(option.en) !== -1
+                          ? `Rank ${rankedItems.indexOf(option.en) + 1}`
+                          : "Select"}
+                      </button>
+                      <span className="flex-1">{option.en}</span>
+                    </div>
+                    <div className="flex items-center gap-3 pl-16" dir="rtl">
+                      <span className="flex-1 text-muted-foreground">{option.ar}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+              {rankedItems.length > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  Ranked: {rankedItems.join(" → ")}
+                </div>
+              )}
+            </div>
+          ) : options.length > 0 ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                {options.map((option, idx) => (
+                  <div key={idx} className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleRankItem(option)}
+                      className={`px-4 py-2 rounded-md border transition-colors ${
+                        rankedItems.includes(option)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background border-border hover:bg-accent"
+                      }`}
+                    >
+                      {rankedItems.indexOf(option) !== -1
+                        ? `Rank ${rankedItems.indexOf(option) + 1}`
+                        : "Select"}
+                    </button>
+                    <span className="flex-1">{option}</span>
+                  </div>
+                ))}
+              </div>
+              {rankedItems.length > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  Ranked: {rankedItems.join(" → ")}
+                </div>
+              )}
+            </div>
+          ) : null)
         )}
 
         {/* Number Input */}
