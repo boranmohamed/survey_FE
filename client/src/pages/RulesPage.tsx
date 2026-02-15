@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useRoute, useLocation } from "wouter";
-import { Type, Loader2, CheckCircle2, AlertCircle, Eye, EyeOff, Lock, Unlock } from "lucide-react";
+import { Type, Loader2, CheckCircle2, AlertCircle, Eye, EyeOff, Lock, Unlock, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { HistorySidebar } from "@/components/HistorySidebar";
@@ -8,6 +8,7 @@ import { useGenerateSurveyRules, useGenerateQuestions, useUpdateSurvey, PromptVa
 import { RulesGenerationValidationError } from "@/lib/rulesGenerationError";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 /**
@@ -79,6 +80,12 @@ export default function RulesPage() {
       };
       final_rules_count: number;
     };
+    survey_version?: string;
+    rules_survey_version?: string;
+    rules_source?: string;
+    is_stale?: boolean;
+    warnings?: string[];
+    invalid_spec_ids?: string[];
   } | null>(null);
   
   // Hooks for generating rules and questions
@@ -123,17 +130,9 @@ export default function RulesPage() {
   /**
    * Handle generate rules button click
    * Calls the API to generate rules based on user requirements
+   * If prompt is empty, backend will generate default AI rules
    */
   const handleGenerateRules = async () => {
-    if (!ruleRequirements.trim()) {
-      toast({
-        title: "Empty input",
-        description: "Please enter rule requirements before generating.",
-        variant: "destructive",
-      });
-      return;
-    }
-
     // Check if thread_id is available
     if (!threadId) {
       toast({
@@ -158,6 +157,7 @@ export default function RulesPage() {
       const response = await generateRules.mutateAsync({
         thread_id: threadId,
         user_prompt: trimmedPrompt || undefined, // Send undefined only if truly empty (after trim)
+        mode: "ai_generate",
         // You can optionally set expected_rules_count here if needed
         // expected_rules_count: 8,
       });
@@ -316,7 +316,7 @@ export default function RulesPage() {
                     setRuleRequirements(value);
                   }
                 }}
-                placeholder="Enter your rule requirements here"
+                placeholder="Optional: Describe rules, or leave empty to auto-generate."
                 className="min-h-[300px] resize-none border-2 border-[#4FD1C7] focus-visible:border-[#38B2AC] focus-visible:ring-2 focus-visible:ring-[#4FD1C7]/20 pr-32 pb-16"
                 maxLength={maxCharacters}
               />
@@ -333,7 +333,7 @@ export default function RulesPage() {
               <div className="absolute bottom-3 right-3">
                 <Button
                   onClick={handleGenerateRules}
-                  disabled={!ruleRequirements.trim() || generateRules.isPending || !threadId}
+                  disabled={generateRules.isPending || !threadId}
                   className="bg-[#4FD1C7] hover:bg-[#38B2AC] text-white border-0 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {generateRules.isPending ? (
@@ -355,6 +355,36 @@ export default function RulesPage() {
               <h2 className="text-2xl font-semibold text-secondary mb-4">
                 Generated Rules ({generatedRules.rules.survey_rules.length})
               </h2>
+              
+              {/* Warnings Banner */}
+              {(generatedRules.is_stale === true || (generatedRules.warnings && generatedRules.warnings.length > 0)) && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>
+                    {generatedRules.is_stale ? "Rules may be outdated" : "Warnings"}
+                  </AlertTitle>
+                  <AlertDescription>
+                    {generatedRules.is_stale && (
+                      <p className="mb-2">These rules may be based on an outdated version of the survey.</p>
+                    )}
+                    {generatedRules.warnings && generatedRules.warnings.length > 0 && (
+                      <div>
+                        <p className="mb-2 font-medium">Issues found:</p>
+                        <ul className="list-disc list-inside space-y-1">
+                          {generatedRules.warnings.slice(0, 5).map((warning, idx) => (
+                            <li key={idx} className="text-sm">{warning}</li>
+                          ))}
+                          {generatedRules.warnings.length > 5 && (
+                            <li className="text-sm text-muted-foreground">
+                              and {generatedRules.warnings.length - 5} more warning{generatedRules.warnings.length - 5 !== 1 ? 's' : ''}
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
               
               <div className="space-y-4">
                 {generatedRules.rules.survey_rules.map((rule, index) => {
@@ -494,6 +524,32 @@ export default function RulesPage() {
                         <p className="font-semibold text-blue-600">{generatedRules.critique_summary.final_rules_count}</p>
                       </div>
                     </div>
+                    {/* Version Information */}
+                    {(generatedRules.survey_version || generatedRules.rules_survey_version) && (
+                      <div className="mt-4 pt-4 border-t border-blue-200">
+                        <p className="text-sm font-medium text-blue-900 mb-2">Version Information</p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                          {generatedRules.survey_version && (
+                            <div>
+                              <p className="text-muted-foreground">Questions version</p>
+                              <p className="font-semibold text-blue-700">{generatedRules.survey_version}</p>
+                            </div>
+                          )}
+                          {generatedRules.rules_survey_version && (
+                            <div>
+                              <p className="text-muted-foreground">Rules version</p>
+                              <p className="font-semibold text-blue-700">{generatedRules.rules_survey_version}</p>
+                            </div>
+                          )}
+                        </div>
+                        {generatedRules.survey_version && generatedRules.rules_survey_version && 
+                         generatedRules.survey_version !== generatedRules.rules_survey_version && (
+                          <p className="mt-2 text-sm text-yellow-700 font-medium">
+                            Version mismatch detected
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               )}

@@ -343,7 +343,7 @@ export const api = {
 /**
  * Get the API base URL from environment variable or use default
  * Can be set via VITE_API_BASE_URL environment variable
- * Defaults to http://127.0.0.1:8000
+ * Defaults to http://192.168.2.71:8000
  */
 export function getApiBaseUrl(): string {
   // Check for Vite environment variable
@@ -351,7 +351,7 @@ export function getApiBaseUrl(): string {
     return import.meta.env.VITE_API_BASE_URL;
   }
   // Fallback to default backend URL
-  return 'http://127.0.0.1:8000';
+  return 'http://192.168.2.71:8000';
 }
 
 // ============================================
