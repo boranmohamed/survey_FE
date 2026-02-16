@@ -20,12 +20,12 @@ import { getText } from "./bilingual";
  * Configure the backend base URL:
  * - Set `VITE_PLANNER_API_BASE_URL` in a `client/.env` file (Vite reads env vars from `client/`).
  * - Example values:
- *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.71:8000`
- *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.71:8000/anomaly`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.6:9092`
+ *   - `VITE_PLANNER_API_BASE_URL=http://192.168.2.6:9092/anomaly`
  */
 
 // Default backend URL - can be overridden with VITE_PLANNER_API_BASE_URL environment variable
-const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.71:8000";
+const DEFAULT_PLANNER_API_BASE_URL = "http://192.168.2.6:9092";
 
 /**
  * Helper function to join base URL with path, handling trailing slashes
@@ -44,7 +44,7 @@ function toggleAnomalyPrefix(baseUrl: string): string {
   const trimmed = baseUrl.replace(/\/+$/, "");
   const anomalySuffix = "/anomaly";
   if (trimmed.toLowerCase().endsWith(anomalySuffix)) {
-    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.71:8000";
+    return trimmed.slice(0, -anomalySuffix.length) || "http://192.168.2.6:9092";
   }
   return `${trimmed}${anomalySuffix}`;
 }
